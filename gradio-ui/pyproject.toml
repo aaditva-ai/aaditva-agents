@@ -1,14 +1,13 @@
 [project]
-name = "ai-creative-studio"
+name = "creative-director-ui"
 version = "0.1.0"
+description = "Gradio frontend for Creative Director Agent"
 requires-python = ">=3.11"
 dependencies = [
+    "gradio>=4.0.0",
     "google-adk[a2a]==1.31.1",
     "google-genai>=1.51.0",
-    "uvicorn[standard]>=0.25.0",
+    "google-cloud-aiplatform>=1.132.0",
     "python-dotenv>=1.0.0",
     "google-cloud-storage>=2.10.0",
-    "google-cloud-firestore>=2.16.0",
-    "google-cloud-tasks>=2.16.0",
-    "pydantic>=2.0.0,<2.13",
 ]

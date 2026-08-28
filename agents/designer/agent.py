@@ -15,54 +15,55 @@ load_dotenv()
 
 logger = logging.getLogger("ai_creative_studio.designer")
 
-SYSTEM_INSTRUCTION = """You are a Visual Content Director specializing in Instagram aesthetics.
+SYSTEM_INSTRUCTION = """You are an expert Visual Content Director specializing in Instagram aesthetics and multimodal asset generation.
 
 IMPORTANT: The conversation history above contains:
 - Brand strategy insights from the Brand Strategist
 - Instagram captions from the Copywriter
 Review BOTH before creating visual concepts.
 
-Your task: For each caption, create exactly 1 visual concept AND generate the actual image.
+Your task: For each caption, create exactly 1 visual concept AND generate the actual image asset using the `generate_image` tool.
 
 Each concept must include:
-- A detailed image generation prompt (photorealistic, specific composition)
-- Visual style (e.g., minimalist, vibrant, cinematic)
+- A short, human-readable presentation `Title` (e.g. "Post 1 — High Mountain Ridge Runner", NOT a snake_case code identifier)
+- A detailed image generation prompt (photorealistic, specific composition, subject, lighting, angle, and atmosphere)
+- Visual style (e.g., minimalist, vibrant, cinematic, moody editorial)
 - Color palette (specific colors with mood rationale)
-- Mood / feeling
-- Instagram dimensions: 1080x1080 (square) or 1080x1350 (portrait)
+- Mood / emotional resonance
+- Instagram dimensions: 1080x1080 (square -> aspect_ratio="1:1") or 1080x1350 (portrait -> aspect_ratio="4:5")
 
-IMPORTANT: After writing each concept, call the `generate_image` tool to produce the actual image.
-Use the concept name as `concept_name` (e.g. "caption1_concept_a") and the full image generation prompt.
-Include the returned `gcs_uri` in your response under each concept.
+TOOL CALL REQUIREMENT:
+For EVERY concept, you MUST call the `generate_image` tool with all three required arguments:
+`generate_image(concept_name="<snake_case_name>", image_prompt="<detailed_prompt>", aspect_ratio="1:1"|"4:5")`
+
+- Map Format 1080x1080 to `aspect_ratio="1:1"`
+- Map Format 1080x1350 to `aspect_ratio="4:5"`
+
+Strict All-or-Nothing Rule:
+- If `generate_image` fails or returns an error, do NOT mask it, do NOT emit blank parts, and do NOT silently omit images. Immediately report the exact failure message so the orchestrator can take appropriate action.
+- If the returned error dict includes `"retryable": true` (a transient quota/rate-limit exhaustion, e.g. "429"/"RESOURCE_EXHAUSTED"), explicitly say the word "RETRYABLE" in your report along with the exact error message, so the orchestrator knows this specific failure is transient and worth retrying rather than a hard failure -- do not just say it "failed".
 
 Format for each caption:
 
 **For Caption [N]: "[Caption Theme]"**
 
+Title: [Short Presentation-Ready Title]
 Concept: [Visual Theme Name]
-- Prompt: [Full image generation prompt - be specific: subject, setting, lighting, angle, style]
-- Generated: [gcs_uri returned by generate_image tool, or error message]
+- Prompt: [Full image generation prompt - subject, setting, lighting, angle, style]
+- Generated: [gcs_uri returned by generate_image tool]
 - Style: [Visual style descriptor]
 - Colors: [Palette with hex codes or descriptive names]
 - Mood: [Emotional tone]
-- Format: [1080x1080 or 1080x1350]
-
-If `generate_image` returns an error, include the error message and continue with remaining captions.
+- Format: [1080x1080 (1:1) or 1080x1350 (4:5)]
 """
 
-# =============================================================================
-# PROVIDED — do not modify
-#
-# Same Agent pattern you used in Step 4. The only difference between
-# specialist agents is the name, description, and instruction.
-# =============================================================================
 root_agent = Agent(
     name="designer",
     model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
     generate_content_config=GENERATE_CONTENT_CONFIG,
     tools=[FunctionTool(func=generate_image)],
     instruction=SYSTEM_INSTRUCTION,
-    description="Creative visual designer for generating social media image concepts",
+    description="Creative visual designer for generating social media image concepts and assets",
 )
 
 logger.info("Designer agent created")
@@ -71,6 +72,10 @@ logger.info("Designer agent created")
 if __name__ == "__main__":
     import uvicorn
     from google.adk.a2a.utils.agent_to_a2a import to_a2a
+    try:
+        from .task_handler import handle_generate_image_task
+    except ImportError:
+        from task_handler import handle_generate_image_task
 
     PORT = int(os.getenv("PORT", "8080"))
     HOST = os.getenv("HOST", "0.0.0.0")
@@ -79,6 +84,9 @@ if __name__ == "__main__":
     PROTOCOL = os.getenv("PROTOCOL", "http")
 
     a2a_app = to_a2a(root_agent, host=PUBLIC_HOST, port=PUBLIC_PORT, protocol=PROTOCOL)
+    a2a_app.add_route(
+        "/internal/tasks/generate-image", handle_generate_image_task, methods=["POST"]
+    )
 
     logger.info(f"Starting Designer on {PROTOCOL}://{HOST}:{PORT}")
     logger.info(f"Agent card: {PROTOCOL}://{HOST}:{PORT}/.well-known/agent.json")

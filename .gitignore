@@ -108,3 +108,4 @@ Desktop.ini
 *.bak
 *.swp
 .cache/
+.adk/

@@ -16,7 +16,11 @@
 # limitations under the License.
 
 # Teardown script for AI Creative Studio
-# Deletes all Cloud Run services and the Agent Engine resource
+# Deletes all Cloud Run services, Secret Manager secrets, build staging buckets, and the Agent Engine resource
+# Usage:
+#   bash deploy/teardown_gcp.sh                # Keeps campaign images bucket (default)
+#   bash deploy/teardown_gcp.sh --keep-images  # Explicitly keep images bucket
+#   bash deploy/teardown_gcp.sh --delete-images# Also delete the campaign images bucket
 
 set -e
 
@@ -26,6 +30,24 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# Default options
+DELETE_IMAGES=false
+
+for arg in "$@"; do
+    case $arg in
+        --delete-images)
+            DELETE_IMAGES=true
+            shift
+            ;;
+        --keep-images)
+            DELETE_IMAGES=false
+            shift
+            ;;
+        *)
+            ;;
+    esac
+done
+
 # Load .env if present
 ENV_FILE="$(dirname "$0")/../.env"
 if [ -f "$ENV_FILE" ]; then
@@ -34,8 +56,9 @@ if [ -f "$ENV_FILE" ]; then
     set +a
 fi
 
-PROJECT_ID="${GCP_PROJECT_ID:-${PROJECT_ID:-}}"
-REGION="${GCP_REGION:-${LOCATION:-us-central1}}"
+PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-${GCP_PROJECT_ID:-${PROJECT_ID:-}}}"
+REGION="${CLOUD_RUN_REGION:-${GCP_REGION:-${LOCATION:-us-central1}}}"
+IMAGES_BUCKET="${GCS_IMAGES_BUCKET:-${PROJECT_ID}-campaign-images}"
 AGENT_ENGINE_RESOURCE_NAME="${AGENT_ENGINE_RESOURCE_NAME:-}"
 
 echo -e "${RED}=== AI Creative Studio — GCP Teardown ===${NC}\n"
@@ -60,8 +83,21 @@ fi
 echo -e "${YELLOW}The following resources will be deleted:${NC}"
 echo -e "  Cloud Run services: brand-strategist, copywriter, designer, critic, project-manager"
 echo -e "  Artifact Registry: cloud-run-source-deploy ($REGION)"
-echo -e "  GCS buckets: gs://${PROJECT_ID}-campaign-images, gs://${PROJECT_ID}-agent-staging, gs://run-sources-${PROJECT_ID}-${REGION}"
-echo -e "  Secret Manager secrets: notion-token, notion-project-db-id, notion-tasks-db-id (if they exist)"
+
+# Build buckets list
+BUCKETS_TO_DELETE=(
+    "gs://${PROJECT_ID}-agent-staging"
+    "gs://run-sources-${PROJECT_ID}-${REGION}"
+)
+
+if [ "$DELETE_IMAGES" = true ]; then
+    BUCKETS_TO_DELETE+=("gs://${IMAGES_BUCKET}")
+    echo -e "  GCS buckets: ${BUCKETS_TO_DELETE[*]} (includes campaign images bucket)"
+else
+    echo -e "  GCS buckets: ${BUCKETS_TO_DELETE[*]} (${GREEN}preserving gs://${IMAGES_BUCKET}${YELLOW})"
+fi
+
+echo -e "  Secret Manager secrets: notion-token, notion-project-db-id, notion-tasks-db-id (if present)"
 if [ -n "$AGENT_ENGINE_RESOURCE_NAME" ]; then
     echo -e "  Agent Engine: $AGENT_ENGINE_RESOURCE_NAME"
 else
@@ -109,8 +145,8 @@ except ImportError:
     print("  vertexai not installed — skipping Agent Engine deletion")
     sys.exit(0)
 
-project  = os.environ.get("GCP_PROJECT_ID") or os.environ.get("PROJECT_ID", "")
-location = os.environ.get("GCP_REGION") or os.environ.get("LOCATION", "us-central1")
+project  = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT_ID") or os.environ.get("PROJECT_ID", "")
+location = os.environ.get("CLOUD_RUN_REGION") or os.environ.get("GCP_REGION") or os.environ.get("LOCATION", "us-central1")
 resource = os.environ.get("AGENT_ENGINE_RESOURCE_NAME", "")
 
 if not resource:
@@ -145,10 +181,7 @@ fi
 # ─── Delete GCS buckets ───────────────────────────────────────────────────────
 echo -e "\n${YELLOW}Deleting GCS buckets...${NC}"
 
-for BUCKET in \
-    # "gs://${PROJECT_ID}-campaign-images" \
-    "gs://${PROJECT_ID}-agent-staging" \
-    "gs://run-sources-${PROJECT_ID}-${REGION}"; do
+for BUCKET in "${BUCKETS_TO_DELETE[@]}"; do
     if gcloud storage buckets describe "$BUCKET" --project="$PROJECT_ID" &>/dev/null; then
         gcloud storage rm -r "$BUCKET" --quiet
         echo -e "  ${GREEN}✓ Deleted: $BUCKET${NC}"
@@ -171,7 +204,7 @@ done
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo -e "\n${GREEN}=== Teardown Complete ===${NC}"
-echo -e "\nVerify everything is removed:"
+echo -e "\nVerify remaining resources:"
 echo -e "  gcloud run services list --region=$REGION"
 echo -e "  gcloud storage buckets list --project=$PROJECT_ID"
 echo -e "  https://console.cloud.google.com/vertex-ai/reasoning-engines?project=$PROJECT_ID"

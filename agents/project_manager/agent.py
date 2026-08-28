@@ -3,14 +3,18 @@ import json
 import logging
 import os
 
+from dotenv import load_dotenv
 from google.adk.agents import Agent
+from google.adk.tools import FunctionTool
 from google.adk.tools.base_tool import BaseTool
 from google.adk.tools.tool_context import ToolContext
-from dotenv import load_dotenv
+
 try:
     from .retry import GENERATE_CONTENT_CONFIG
+    from .notion_image_tool import attach_campaign_images
 except ImportError:
     from retry import GENERATE_CONTENT_CONFIG
+    from notion_image_tool import attach_campaign_images
 
 load_dotenv()
 
@@ -58,8 +62,6 @@ def handle_notion_error(
 
 
 def get_system_instruction(project_database_id=None, tasks_database_id=None):
-    # notion_section is empty when Notion is not configured, so the agent
-    # receives no tool instructions for capabilities it doesn't have.
     notion_section = (
         f"""
 Projects database ID: {project_database_id}
@@ -82,12 +84,15 @@ Property rules:
 - Only set properties whose type you can identify from the schema response; if a property type
   is unclear after reading the schema, skip it and note it in the Notion Status
 
+Image Embedding Rules:
+- If campaign images are provided (under "Generated Images" with title, gcs_uri, and url):
+  1. Capture the newly created project page ID (e.g. `project_page_id`).
+  2. Call `attach_campaign_images(page_id=project_page_id, images=images_list)` ONCE with all image dictionaries.
+  3. NEVER paste raw signed URLs or expiring links into the Notion page body text or bulleted lists.
+  4. Report the outcome in the **Notion Status** section (e.g. "Project created, 8 tasks linked, 3 images embedded directly into project page").
+
 If any Notion call fails, continue — the text timeline is always the primary deliverable.
 Write your complete response AFTER all Notion operations are done (or have failed).
-
-If image HTTPS links are provided in the input (under "Generated Images" from the Creative
-Director), add them to the Notion project page body as a bulleted list under a
-"Generated Images" heading after creating the project page.
 """
         if project_database_id
         else ""
@@ -117,15 +122,15 @@ Director), add them to the Notion project page body as a bulleted list under a
     [3-5 key checkpoints with dates]
 
     **Notion Status:**
-    [What happened - e.g. "Project created (ID: xxx), 8 tasks linked" or "Notion not configured - text timeline only"]
+    [What happened - e.g. "Project created (ID: xxx), 8 tasks linked, 3 visual assets embedded" or "Notion not configured - text timeline only"]
     """
 
 
 def create_project_manager_agent():
     """Create the Project Manager agent, with Notion MCP if credentials are set."""
-    notion_token           = os.getenv("NOTION_TOKEN")
-    notion_project_db_id   = os.getenv("NOTION_PROJECT_DATABASE_ID")
-    notion_tasks_db_id     = os.getenv("NOTION_TASKS_DATABASE_ID")
+    notion_token = os.getenv("NOTION_TOKEN")
+    notion_project_db_id = os.getenv("NOTION_PROJECT_DATABASE_ID")
+    notion_tasks_db_id = os.getenv("NOTION_TASKS_DATABASE_ID")
 
     if not notion_token or not notion_project_db_id or not notion_tasks_db_id:
         logger.warning("Notion credentials not set — running without Notion integration")
@@ -139,7 +144,9 @@ def create_project_manager_agent():
         )
 
     else:
-        logger.info(f"Notion configured — projects database: {notion_project_db_id}, tasks database: {notion_tasks_db_id}")
+        logger.info(
+            f"Notion configured — projects database: {notion_project_db_id}, tasks database: {notion_tasks_db_id}"
+        )
 
         from google.adk.tools.mcp_tool import McpToolset, StdioConnectionParams
         from mcp import StdioServerParameters
@@ -149,12 +156,12 @@ def create_project_manager_agent():
             env={
                 "NOTION_TOKEN": notion_token,
                 "PATH": os.environ.get("PATH", ""),
-            }
+            },
         )
         notion_toolset = McpToolset(
             connection_params=StdioConnectionParams(
                 server_params=server_params,
-                timeout=30.0
+                timeout=30.0,
             )
         )
 
@@ -167,8 +174,8 @@ def create_project_manager_agent():
                 project_database_id=notion_project_db_id,
                 tasks_database_id=notion_tasks_db_id,
             ),
-            description="Project manager with Notion integration for task tracking",
-            tools=[notion_toolset],
+            description="Project manager with Notion integration for task tracking and asset embedding",
+            tools=[notion_toolset, FunctionTool(func=attach_campaign_images)],
         )
 
 

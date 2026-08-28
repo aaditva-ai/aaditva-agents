@@ -1,27 +1,30 @@
-"""Image links tool: generates short-lived HTTPS URLs for GCS images."""
+"""Image links tool: generates short-lived HTTPS URLs for GCS images with human-readable titles."""
 import os
 import re
 from datetime import timedelta
+from typing import Optional
 
 
-def get_image_links(gcs_uris: list[str]) -> dict:
+def get_image_links(gcs_uris: list[str], titles: Optional[list[str]] = None) -> dict:
     """
-    Generate short-lived HTTPS links for GCS images so they can be opened in any browser.
+    Generate short-lived HTTPS links for GCS images so they can be opened in any browser
+    or embedded into project deliverables.
 
-    Call this once with all collected gcs_uri values before delivering the final campaign summary.
+    Call this once with all collected gcs_uri values and optional titles before delivering the final campaign summary.
 
     Args:
         gcs_uris: List of GCS URIs (gs://bucket/path) from the Designer
+        titles: Optional list of human-readable image titles corresponding to each gcs_uri
 
     Returns:
-        {"status": "success", "links": [{"concept": "...", "url": "https://..."}]}
+        {"status": "success", "links": [{"title": "...", "concept": "...", "gcs_uri": "...", "url": "https://..."}], "signed": bool}
         or {"status": "error", "error": "..."}
     """
     try:
         from google.cloud import storage as gcs
         import google.auth
 
-        project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
+        project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT_ID")
         client = gcs.Client(project=project_id)
 
         credentials, _ = google.auth.default()
@@ -36,12 +39,15 @@ def get_image_links(gcs_uris: list[str]) -> dict:
         # On Agent Runtime, service_account_email is "default" - resolve the real email
         # from the GCP metadata server.
         if sa_email == "default":
-            import urllib.request
-            req = urllib.request.Request(
-                "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email",
-                headers={"Metadata-Flavor": "Google"},
-            )
-            sa_email = urllib.request.urlopen(req, timeout=2).read().decode()
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email",
+                    headers={"Metadata-Flavor": "Google"},
+                )
+                sa_email = urllib.request.urlopen(req, timeout=2).read().decode()
+            except Exception:
+                sa_email = None
 
         if sa_email:
             # Use IAM Sign Blob API - works for all credential types (Compute Engine,
@@ -68,13 +74,19 @@ def get_image_links(gcs_uris: list[str]) -> dict:
             use_signed = False
 
         links = []
-        for uri in gcs_uris:
+        for i, uri in enumerate(gcs_uris):
             without_prefix = uri[len("gs://"):]
             bucket_name, blob_path = without_prefix.split("/", 1)
             blob = client.bucket(bucket_name).blob(blob_path)
 
             filename = blob_path.rsplit("/", 1)[-1]
             concept = re.sub(r"-[0-9a-f]{8}\.[^.]+$", "", filename)
+
+            # Determine human-readable title
+            if titles and i < len(titles) and titles[i]:
+                title = titles[i].strip()
+            else:
+                title = concept.replace("_", " ").title()
 
             if use_signed:
                 url = blob.generate_signed_url(
@@ -88,7 +100,12 @@ def get_image_links(gcs_uris: list[str]) -> dict:
                 # Set SIGNING_SERVICE_ACCOUNT in .env to enable signed URLs locally.
                 url = f"https://storage.googleapis.com/{bucket_name}/{blob_path}"
 
-            links.append({"concept": concept, "url": url})
+            links.append({
+                "title": title,
+                "concept": concept,
+                "gcs_uri": uri,
+                "url": url,
+            })
 
         return {"status": "success", "links": links, "signed": use_signed}
 

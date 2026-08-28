@@ -22,13 +22,13 @@ Use this to test if single-stage deployment works or what error it produces.
 
 Usage:
     # Deploy Agent Engine
-    python3 deploy_orchestrator.py --action deploy
+    uv run python deploy/deploy_orchestrator.py --action deploy
 
     # Test deployment
-    python3 deploy_orchestrator.py --action test --resource_name <resource_name>
+    uv run python deploy/deploy_orchestrator.py --action test --resource_name <resource_name>
 
     # Cleanup (delete Agent Engine)
-    python3 deploy_orchestrator.py --action cleanup --resource_name <resource_name>
+    uv run python deploy/deploy_orchestrator.py --action cleanup --resource_name <resource_name>
 """
 
 import argparse
@@ -267,7 +267,7 @@ def deploy_orchestrator(auto_deploy_specialists=False):
         )
 
         print("\n💡 To test the deployment, run:")
-        print(f'python3 {__file__} --action test --resource_name "{resource_name}"')
+        print(f'uv run python {__file__} --action test --resource_name "{resource_name}"')
 
         return agent_engine_resource, resource_name
 
@@ -437,10 +437,10 @@ def main():
                 auto_deploy_specialists=args.auto_deploy_specialists
             )
             print("\n💡 To test the deployment, run:")
-            print(f'python3 {__file__} --action test --resource_name "{resource_name}"')
+            print(f'uv run python {__file__} --action test --resource_name "{resource_name}"')
             print("\n💡 To delete the deployment, run:")
             print(
-                f'python3 {__file__} --action cleanup --resource_name "{resource_name}"'
+                f'uv run python {__file__} --action cleanup --resource_name "{resource_name}"'
             )
         except Exception:
             print("\n\n" + "=" * 70)
@@ -470,7 +470,7 @@ def main():
                 print("   Or set AGENT_ENGINE_RESOURCE_NAME in .env")
                 print("\nUsage:")
                 print(
-                    f'  python3 {__file__} --action cleanup --resource_name "projects/.../reasoningEngines/..."'
+                    f'  uv run python {__file__} --action cleanup --resource_name "projects/.../reasoningEngines/..."'
                 )
                 return
         cleanup_agent_engine(args.resource_name)

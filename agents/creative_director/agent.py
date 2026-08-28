@@ -145,10 +145,5 @@ def create_creative_director():
     )
     return agent, app
 
-    # Placeholder return until App is configured
-    from google.adk.apps import App
-    app = App(name="creative_director", root_agent=agent, plugins=[LoggingPlugin()])
-    return agent, app
-
 
 root_agent, root_app = create_creative_director()

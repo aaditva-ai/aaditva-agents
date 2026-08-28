@@ -6,6 +6,11 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
+try:
+    from .retry import RETRY_CONFIG
+except ImportError:
+    from retry import RETRY_CONFIG
+
 
 class _GeminiReview(BaseModel):
     """Internal schema used to force structured JSON output from Gemini."""
@@ -82,6 +87,10 @@ Scoring guide:
             config=types.GenerateContentConfig(
                 response_schema=_GeminiReview,
                 response_mime_type="application/json",
+                http_options=types.HttpOptions(
+                    retry_options=RETRY_CONFIG,
+                    timeout=120_000,
+                ),
             ),
         )
         # Store the result in `response`.
