@@ -873,3 +873,48 @@ placeholder for it. You caught this. Splitting the original plan's Step 7
 
 Explicitly not started. Waiting on you to manually verify
 `https://aaditva.web.app` before anything Gradio-related is touched.
+
+## Bug found during your manual verification: misleading "CORS" error on a fresh campaign
+
+You reported a browser console error --
+`Access to fetch ... has been blocked by CORS policy: No
+'Access-Control-Allow-Origin' header is present` -- immediately after
+starting a new campaign on the deployed site, though the campaign kept
+running fine and a page refresh "fixed" it.
+
+**Root cause, confirmed from broker logs, not guessed**: not a CORS
+misconfiguration. `GET /campaigns/{id}/events`'s very first poll after a
+fresh `POST /campaigns` can land in the real, inherent race between the
+broker enqueueing the Cloud Tasks dispatch (which returns to the client in
+~1s) and campaign-driver actually connecting and creating the Agent Engine
+session server-side. `sessions_client.list_events` then gets a genuine
+`404 Not Found` from `sessions.events.list` -- confirmed directly via the
+Agent Engine API against a Firestore campaign doc created with no
+corresponding session, reproducing the exact race for real. That 404 was
+an unhandled exception, which produced a raw `500` that never reached
+Starlette's CORS middleware to get an `Access-Control-Allow-Origin` header
+attached (confirmed against the actual traceback in Cloud Run logs: the
+exception is raised and re-raised through several exception-handler layers
+before uvicorn ever gets back to the CORS middleware's response-wrapping
+code). A response missing that header, regardless of status code, is what
+Chrome reports as "blocked by CORS policy" -- a real, if confusing,
+browser behavior, not evidence that `BROKER_ALLOWED_ORIGINS`/`CORSMiddleware`
+were misconfigured (both were independently re-verified correct on the
+exact failing URL, preflight and all, before looking further).
+
+**Fix**: `sessions_client.list_events` now catches `google.genai.errors.
+APIError` and returns `[]` when `.code == 404`, re-raising anything else --
+a 404 here means "no events yet," which is exactly what the campaign
+document's own `dispatched` status already says, so this isn't masking a
+real error, just aligning two views of the same "hasn't started yet"
+state. 4 new tests in `broker/tests/test_sessions_client.py` (404 →
+empty list, non-404 API errors and non-API exceptions still propagate,
+happy path unaffected); 57 broker tests total.
+
+**Verified live**: created a real Firestore campaign document with no
+corresponding Agent Engine session (the exact race, reproduced on demand
+rather than waited for) and called the fixed `list_events` against the
+real live Agent Engine API -- returned `[]` cleanly, no exception,
+confirming the fix works against the actual API this bug came from, not
+just a mock. Redeployed to Cloud Run. The genuinely orphaned test session
+was cleaned up from Firestore afterward.

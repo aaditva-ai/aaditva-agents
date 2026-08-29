@@ -44,9 +44,30 @@ def list_events(session_id: str, since: str | None = None) -> list:
     `since` (an RFC3339 string). Mirrors scripts/spikes/common.py's
     list_events, the exact call Step 1 confirmed surfaces events
     mid-invocation.
+
+    Treats a 404 from the Agent Engine session store as "no events yet"
+    rather than letting it propagate: there's an inherent race between the
+    broker enqueueing the Cloud Tasks dispatch (POST /campaigns returns
+    immediately, per the plan's ~1s requirement) and campaign-driver
+    actually connecting and creating the session server-side -- the SPA's
+    very first poll can genuinely land before the session exists.
+    campaign_doc's own status ("dispatched") already tells the caller
+    correctly that nothing has started yet; a 404 here should read the
+    same way, not surface as an unhandled 500. Caught live: this was an
+    unhandled exception in handle_get_events, which produced a 500 with no
+    CORS header attached (the exception escapes before Starlette's CORS
+    middleware can write it), which browsers report as a misleading "CORS
+    policy" error rather than the real 500.
     """
+    from google.genai import errors as genai_errors
+
     client = _get_client()
     config = {"filter": f'timestamp>="{since}"'} if since else None
-    return list(
-        client.agent_engines.sessions.events.list(name=session_name(session_id), config=config)
-    )
+    try:
+        return list(
+            client.agent_engines.sessions.events.list(name=session_name(session_id), config=config)
+        )
+    except genai_errors.APIError as e:
+        if e.code == 404:
+            return []
+        raise
