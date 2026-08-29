@@ -45,7 +45,7 @@ STALL_THRESHOLD_SECONDS = float(os.environ.get("CAMPAIGN_STALL_THRESHOLD_SECONDS
 TITLE_MAX_CHARS = 80
 
 
-def _require_uid(request: Request) -> str:
+def _require_user(request: Request) -> auth.AuthenticatedUser:
     """Raises auth.AuthError (caught by each handler) if verification fails."""
     return auth.verify_id_token(request.headers.get("Authorization", ""))
 
@@ -71,7 +71,7 @@ def _iso(value) -> str | None:
 
 async def handle_create_campaign(request: Request) -> JSONResponse:
     try:
-        uid = _require_uid(request)
+        user = _require_user(request)
     except auth.AuthError as e:
         return JSONResponse({"error": "unauthorized", "detail": str(e)}, status_code=401)
 
@@ -85,7 +85,7 @@ async def handle_create_campaign(request: Request) -> JSONResponse:
         return JSONResponse({"error": "missing prompt"}, status_code=400)
 
     try:
-        admission = await campaign_limits.check_admission(uid)
+        admission = await campaign_limits.check_admission(user.uid, is_anonymous=user.is_anonymous)
     except RuntimeError as e:
         logger.exception("Rate limiter unavailable")
         return JSONResponse({"status": "error", "error": str(e)}, status_code=503)
@@ -96,20 +96,20 @@ async def handle_create_campaign(request: Request) -> JSONResponse:
         )
 
     session_id = str(uuid.uuid4())
-    await campaign_store.create_dispatched(session_id, uid, prompt)
-    await campaign_queue.enqueue(session_id, uid, prompt)
+    await campaign_store.create_dispatched(session_id, user.uid, prompt)
+    await campaign_queue.enqueue(session_id, user.uid, prompt)
 
-    logger.info("Campaign %s dispatched for user %s", session_id, uid)
+    logger.info("Campaign %s dispatched for user %s", session_id, user.uid)
     return JSONResponse({"sessionId": session_id})
 
 
 async def handle_list_campaigns(request: Request) -> JSONResponse:
     try:
-        uid = _require_uid(request)
+        user = _require_user(request)
     except auth.AuthError as e:
         return JSONResponse({"error": "unauthorized", "detail": str(e)}, status_code=401)
 
-    docs = await campaign_store.list_campaigns_for_user(uid)
+    docs = await campaign_store.list_campaigns_for_user(user.uid)
     campaigns = [
         {
             "sessionId": doc.get("session_id"),
@@ -211,7 +211,7 @@ def _fetch_steps_and_status(campaign_doc: dict, session_id: str, since: str | No
 
 async def handle_get_events(request: Request) -> JSONResponse:
     try:
-        uid = _require_uid(request)
+        user = _require_user(request)
     except auth.AuthError as e:
         return JSONResponse({"error": "unauthorized", "detail": str(e)}, status_code=401)
 
@@ -221,7 +221,7 @@ async def handle_get_events(request: Request) -> JSONResponse:
     campaign_doc = await campaign_store.get_campaign(session_id)
     if campaign_doc is None:
         return JSONResponse({"error": "not found"}, status_code=404)
-    if campaign_doc.get("user_id") != uid:
+    if campaign_doc.get("user_id") != user.uid:
         # Same response as "not found" -- do not confirm a session exists
         # to a caller who does not own it.
         return JSONResponse({"error": "not found"}, status_code=404)
@@ -254,13 +254,13 @@ async def handle_resume_campaign(request: Request) -> JSONResponse:
     route exists for.
     """
     try:
-        uid = _require_uid(request)
+        user = _require_user(request)
     except auth.AuthError as e:
         return JSONResponse({"error": "unauthorized", "detail": str(e)}, status_code=401)
 
     session_id = request.path_params["session_id"]
     campaign_doc = await campaign_store.get_campaign(session_id)
-    if campaign_doc is None or campaign_doc.get("user_id") != uid:
+    if campaign_doc is None or campaign_doc.get("user_id") != user.uid:
         return JSONResponse({"error": "not found"}, status_code=404)
 
     _, _, derived_status = _fetch_steps_and_status(campaign_doc, session_id, since=None)
@@ -271,7 +271,7 @@ async def handle_resume_campaign(request: Request) -> JSONResponse:
         )
 
     try:
-        admission = await campaign_limits.check_admission(uid)
+        admission = await campaign_limits.check_admission(user.uid, is_anonymous=user.is_anonymous)
     except RuntimeError as e:
         logger.exception("Rate limiter unavailable")
         return JSONResponse({"status": "error", "error": str(e)}, status_code=503)
@@ -284,9 +284,9 @@ async def handle_resume_campaign(request: Request) -> JSONResponse:
         "specialist calls that already returned a result above -- pick up "
         "with the next step."
     )
-    await campaign_queue.enqueue(session_id, uid, prompt)
+    await campaign_queue.enqueue(session_id, user.uid, prompt)
 
-    logger.info("Campaign %s resumed for user %s", session_id, uid)
+    logger.info("Campaign %s resumed for user %s", session_id, user.uid)
     return JSONResponse({"status": "ok", "sessionId": session_id})
 
 

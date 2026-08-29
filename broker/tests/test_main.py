@@ -24,7 +24,10 @@ import sessions_client  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _authed(monkeypatch):
-    monkeypatch.setattr(auth, "verify_id_token", lambda header: "user-123")
+    monkeypatch.setattr(
+        auth, "verify_id_token",
+        lambda header: auth.AuthenticatedUser(uid="user-123", is_anonymous=False),
+    )
 
 
 def _client():
@@ -74,6 +77,49 @@ def test_create_campaign_returns_429_when_rate_limited(monkeypatch):
 
     assert resp.status_code == 429
     assert "rate_limited" in resp.json()["error"]
+    enqueue.assert_not_awaited()
+
+
+def test_create_campaign_passes_is_anonymous_through_to_check_admission(monkeypatch):
+    """The anonymous-auth lifetime cap (campaign_limits.check_admission's
+    is_anonymous kwarg) only applies when the verified token actually came
+    from an anonymous sign-in -- this pins down that handle_create_campaign
+    forwards auth.AuthenticatedUser.is_anonymous rather than defaulting it.
+    """
+    monkeypatch.setattr(
+        auth, "verify_id_token",
+        lambda header: auth.AuthenticatedUser(uid="anon-1", is_anonymous=True),
+    )
+    check_admission = AsyncMock(return_value={"allowed": True})
+    monkeypatch.setattr(campaign_limits, "check_admission", check_admission)
+    monkeypatch.setattr(campaign_store, "create_dispatched", AsyncMock())
+    monkeypatch.setattr(campaign_queue, "enqueue", AsyncMock())
+
+    resp = _client().post("/campaigns", json={"prompt": "hi"})
+
+    assert resp.status_code == 200
+    check_admission.assert_awaited_once_with("anon-1", is_anonymous=True)
+
+
+def test_create_campaign_returns_429_when_anonymous_lifetime_cap_exceeded(monkeypatch):
+    monkeypatch.setattr(
+        auth, "verify_id_token",
+        lambda header: auth.AuthenticatedUser(uid="anon-1", is_anonymous=True),
+    )
+    monkeypatch.setattr(
+        campaign_limits, "check_admission",
+        AsyncMock(return_value={
+            "allowed": False, "status": "error",
+            "error": "rate_limited: anonymous sessions are limited to 3 campaign starts total. Sign in with a Google account to continue.",
+        }),
+    )
+    enqueue = AsyncMock()
+    monkeypatch.setattr(campaign_queue, "enqueue", enqueue)
+
+    resp = _client().post("/campaigns", json={"prompt": "hi"})
+
+    assert resp.status_code == 429
+    assert "anonymous" in resp.json()["error"]
     enqueue.assert_not_awaited()
 
 
@@ -318,6 +364,31 @@ def test_resume_happy_path_for_failed_campaign(monkeypatch):
     enqueue.assert_awaited_once()
     assert enqueue.await_args.args[0] == "s1"
     assert enqueue.await_args.args[1] == "user-123"
+
+
+def test_resume_passes_is_anonymous_through_to_check_admission(monkeypatch):
+    """A resume dispatches an equally real, billable campaign-driver run as
+    a fresh start, so it must be gated by the same anonymous lifetime cap
+    -- otherwise an anonymous user could bypass the cap entirely by
+    resuming instead of starting fresh.
+    """
+    monkeypatch.setattr(
+        auth, "verify_id_token",
+        lambda header: auth.AuthenticatedUser(uid="anon-1", is_anonymous=True),
+    )
+    monkeypatch.setattr(
+        campaign_store, "get_campaign",
+        AsyncMock(return_value={"user_id": "anon-1", "status": "failed"}),
+    )
+    monkeypatch.setattr(sessions_client, "list_events", lambda session_id, since=None: [])
+    check_admission = AsyncMock(return_value={"allowed": True})
+    monkeypatch.setattr(campaign_limits, "check_admission", check_admission)
+    monkeypatch.setattr(campaign_queue, "enqueue", AsyncMock())
+
+    resp = _client().post("/campaigns/s1/resume")
+
+    assert resp.status_code == 200
+    check_admission.assert_awaited_once_with("anon-1", is_anonymous=True)
 
 
 def test_resume_returns_429_when_rate_limited(monkeypatch):

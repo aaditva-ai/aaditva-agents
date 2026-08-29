@@ -703,15 +703,67 @@ one for the first time is gated behind Firebase Console's own
 initialization/ToS-acceptance flow — there is no API call I could find
 that does this from here.
 
-**One step left for you:**
-1. Enable a sign-in provider (e.g. Google) in Firebase Console →
-   [Authentication → Sign-in method](https://console.firebase.google.com/project/aaditva/authentication/providers)
-   (first visit here also does the one-time Identity Platform
-   initialization).
+**Update**: you've since enabled both Google and Anonymous sign-in
+providers in Firebase Console yourself, unblocking the item this section
+originally asked for. Nothing further needed from you before the
+end-to-end verification pass below.
 
-Once that's done, tell me and I'll pick up the one remaining verification
+When you're ready, tell me and I'll pick up the one remaining verification
 gap common to every step above: an actual signed-in user starting a real
 campaign through the deployed SPA and broker, watching it render live,
 reloading mid-campaign, and (if a stall or failure is reproducible)
 exercising the Resume button — closing the loop before Step 7 removes
 Gradio.
+
+## Post-Step-6 addition: hard lifetime cap on Firebase Anonymous Auth
+
+You enabled both Google and Anonymous sign-in providers and asked for
+Anonymous Auth specifically to be capped at no more than 3 triggers per
+uid — tighter than, and separate from, the existing sliding-window rate
+limiter (`campaign_limits.try_acquire_rate_limit`), because Anonymous Auth
+mints a fresh, unverified uid per browser/device with no way to tie it to
+a real identity, so the ordinary per-window rate limit alone doesn't bound
+total cost the way it does for a signed-in Google account.
+
+- **`broker/auth.py`'s `verify_id_token` now returns an `AuthenticatedUser`
+  NamedTuple (`uid`, `is_anonymous`)** instead of a bare uid string,
+  reading Firebase's own `firebase.sign_in_provider` claim
+  (`"anonymous"` vs. e.g. `"google.com"`) out of the decoded token. Every
+  route (`handle_create_campaign`, `handle_list_campaigns`,
+  `handle_get_events`, `handle_resume_campaign`) was updated to use
+  `user.uid`/`user.is_anonymous` instead of a plain `uid` variable.
+- **The cap is a one-way lifetime counter
+  (`campaign_limits.try_acquire_anonymous_lifetime_trigger`), not a token
+  bucket** — deliberately does not refill over time, unlike the existing
+  rate limiter, since the goal is bounding total lifetime cost from one
+  anonymous identity rather than smoothing request rate. Stored in its own
+  `campaign_anonymous_usage` Firestore collection (not reusing
+  `campaign_rate_limits`, which does refill) and gated behind a Firestore
+  transaction so two concurrent requests from the same anonymous uid
+  cannot both read the same pre-increment count and both be admitted one
+  over the cap.
+- **Applied to both `POST /campaigns` (fresh start) and
+  `POST /campaigns/{id}/resume`** — a resume dispatches an equally real,
+  billable `campaign-driver` run, so gating only fresh starts would let an
+  anonymous user trivially bypass the cap by resuming a campaign instead
+  of starting a new one.
+- **Checked before, not after, the existing rate limiter** in
+  `check_admission`, since it's the strictly tighter constraint for an
+  anonymous caller — no reason to spend a rate-limit token on a request
+  that's about to be refused by the lifetime cap anyway.
+- **Verified**: 6 new unit tests in `broker/tests/test_campaign_limits.py`
+  against a fake Firestore transaction layer (first-3-allowed,
+  4th-refused, no time-based refill, per-uid scoping, `check_admission`
+  wiring for both the refusal and the non-anonymous-unaffected cases), 3
+  new integration tests in `test_main.py` confirming `is_anonymous` is
+  correctly threaded from the verified token through to `check_admission`
+  at both the create and resume routes. All 51 broker tests pass. **Live
+  Firestore validation**: ran the real (non-fake) transactional function
+  against the actual `aaditva` Firestore 5 times in a row for one test
+  uid — confirmed `True, True, True, False, False`, exactly the intended
+  3-trigger cap — then cleaned up the test document. Redeployed to Cloud
+  Run.
+- **Not yet verified**: the cap firing through an actual anonymous
+  sign-in via the SPA end-to-end (Google and Anonymous are now both
+  enabled per your message, so this is unblocked — folded into the same
+  end-to-end verification pass noted above once you confirm you're ready).

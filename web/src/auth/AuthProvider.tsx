@@ -5,13 +5,20 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth";
+import {
+  onAuthStateChanged,
+  signInAnonymously,
+  signInWithPopup,
+  signOut,
+  type User,
+} from "firebase/auth";
 import { auth, googleAuthProvider, isFirebaseConfigured } from "../firebase";
 
 type AuthState = {
   user: User | null;
   loading: boolean;
   signIn: () => Promise<void>;
+  signInAsGuest: () => Promise<void>;
   signOutUser: () => Promise<void>;
 };
 
@@ -42,13 +49,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signInWithPopup(auth, googleAuthProvider);
   };
 
+  // Anonymous sessions are subject to a hard, non-refilling lifetime cap
+  // on campaign starts/resumes (broker/campaign_limits.py's
+  // CAMPAIGN_ANONYMOUS_MAX_TRIGGERS) -- offered as a lower-friction way to
+  // try the product without a Google account, at a deliberately tighter
+  // usage ceiling.
+  const signInAsGuest = async () => {
+    if (!isFirebaseConfigured || !auth) return;
+    await signInAnonymously(auth);
+  };
+
   const signOutUser = async () => {
     if (!isFirebaseConfigured || !auth) return;
     await signOut(auth);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOutUser }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signInAsGuest, signOutUser }}>
       {children}
     </AuthContext.Provider>
   );

@@ -6,6 +6,7 @@ the hardcoded "gradio-user" at gradio-ui/app.py:218 -- plan Proposed
 Changes for broker/main.py).
 """
 import logging
+from typing import NamedTuple
 
 import firebase_admin
 from firebase_admin import auth as firebase_auth
@@ -28,8 +29,18 @@ class AuthError(Exception):
     """Raised for any authentication failure; the caller maps this to 401."""
 
 
-def verify_id_token(authorization_header: str) -> str:
-    """Verify the bearer token and return the caller's Firebase uid.
+class AuthenticatedUser(NamedTuple):
+    uid: str
+    # True iff this token was issued to a Firebase Anonymous Auth session
+    # (Firebase's own `firebase.sign_in_provider` claim == "anonymous", as
+    # opposed to e.g. "google.com"). campaign_limits uses this to apply the
+    # tighter per-uid lifetime trigger cap requested for Anonymous Auth --
+    # see main.py's handle_create_campaign/handle_resume_campaign.
+    is_anonymous: bool
+
+
+def verify_id_token(authorization_header: str) -> AuthenticatedUser:
+    """Verify the bearer token and return the caller's identity.
 
     Raises AuthError on a missing header, malformed token, or any
     verification failure (expired, revoked, wrong audience/project, etc.).
@@ -51,4 +62,6 @@ def verify_id_token(authorization_header: str) -> str:
     uid = decoded.get("uid")
     if not uid:
         raise AuthError("decoded token has no uid")
-    return uid
+
+    sign_in_provider = (decoded.get("firebase") or {}).get("sign_in_provider")
+    return AuthenticatedUser(uid=uid, is_anonymous=sign_in_provider == "anonymous")

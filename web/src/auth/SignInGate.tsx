@@ -16,7 +16,7 @@ import { useAuth } from "./AuthProvider";
  * an uncaught error and white-screen the app.
  */
 export function SignInGate({ children }: { children: ReactNode }) {
-  const { user, loading, signIn } = useAuth();
+  const { user, loading, signIn, signInAsGuest } = useAuth();
 
   if (!isFirebaseConfigured) {
     return (
@@ -44,6 +44,13 @@ export function SignInGate({ children }: { children: ReactNode }) {
         <h1>Aaditva Campaign Builder</h1>
         <p>Sign in to start or view your campaigns.</p>
         <button onClick={() => void signIn()}>Sign in with Google</button>
+        <p>
+          <button onClick={() => void signInAsGuest()}>Continue as guest</button>
+        </p>
+        <p className="muted-text">
+          Guest sessions are limited to a small number of campaigns — sign
+          in with Google for unrestricted use.
+        </p>
       </div>
     );
   }
