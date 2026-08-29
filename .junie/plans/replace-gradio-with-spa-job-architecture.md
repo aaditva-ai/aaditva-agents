@@ -340,11 +340,17 @@ Users are never left watching an indefinite spinner, and a dead run can be resum
 - Build the recent-campaigns view on `useCampaigns()` (`GET /campaigns`), so any run is reachable from server state with no `localStorage` involved; refetch on focus keeps it current.
 - Add tests for `selectTranscript` (dedupe, grouping, compaction leftovers, repeated text) and a smoke test that a simulated 500 mid-poll leaves the transcript intact.
 
-###   Step 7: Cut over and remove the Gradio stack
-The new frontend is live and the Gradio implementation is fully removed from the repo.
+###   Step 7: Deploy the SPA to Firebase Hosting and verify
+The new frontend is live on a real CDN URL, verified end-to-end against the real Agent Engine, with Gradio still running untouched alongside it for side-by-side comparison.
 
-- Deploy the SPA to Firebase Hosting and verify end-to-end against the real Agent Engine, including a >7-minute campaign — the exact case that fails today under `--timeout=300`.
+- Build the SPA for production (`npm run build`) and deploy to Firebase Hosting (`firebase deploy --only hosting`).
+- Verify end-to-end against the real Agent Engine on the deployed URL (not just `localhost` dev server), including a >7-minute campaign — the exact case that fails today under `--timeout=300`.
 - Run the reload-mid-campaign and image-rendering validations against the deployed stack.
+- Hand off to you for manual verification of the deployed app before anything is removed.
+
+###   Step 8: Cut over and remove the Gradio stack (deferred until you sign off on Step 7)
+The Gradio implementation is fully removed from the repo, once you've manually verified the deployed SPA replaces it.
+
 - Delete `gradio-ui/` (`app.py`, `Dockerfile`, `pyproject.toml`, `uv.lock`, `README.md`) and `deploy/deploy_gradio.py`.
 - Remove the `creative-director-ui` Cloud Run service and drop Gradio from dependency manifests.
 - Update `README.md`, `docs/`, and `deploy/teardown_gcp.sh` to cover the SPA, broker, campaign queue and driver, replacing all Gradio references.
@@ -355,7 +361,7 @@ This section records judgment calls made while implementing Steps 2–6,
 since the plan above was written before Step 1's spikes ran and before any
 code existed. Gradio is deliberately left in place throughout (`gradio-ui/`,
 `deploy/deploy_gradio.py`, the `creative-director-ui` Cloud Run service) so
-it can be compared side-by-side with the new SPA before Step 7 removes it.
+it can be compared side-by-side with the new SPA before Step 8 removes it.
 
 ## Step 2: campaign-driver + Cloud Tasks queue
 
@@ -712,7 +718,7 @@ When you're ready, tell me and I'll pick up the one remaining verification
 gap common to every step above: an actual signed-in user starting a real
 campaign through the deployed SPA and broker, watching it render live,
 reloading mid-campaign, and (if a stall or failure is reproducible)
-exercising the Resume button — closing the loop before Step 7 removes
+exercising the Resume button — closing the loop before Step 8 removes
 Gradio.
 
 ## Post-Step-6 addition: hard lifetime cap on Firebase Anonymous Auth
@@ -830,3 +836,40 @@ against Firestore in the prior section -- not worth the spend), and the
 Resume button (no failure/stall occurred in this run to trigger it
 against). Both are covered by unit/integration tests; only the live
 button-click path is unexercised.
+
+**Correction**: the end-to-end run above was against the local Vite dev
+server (`localhost:5173`), not a deployed build -- the SPA had not
+actually been deployed to Firebase Hosting yet at that point, despite
+`BROKER_ALLOWED_ORIGINS` already listing `https://aaditva.web.app` as a
+placeholder for it. You caught this. Splitting the original plan's Step 7
+(which bundled "deploy" and "remove Gradio" into one step) into two:
+
+## Step 7: Deploy the SPA to Firebase Hosting (done)
+
+- Added `web/.firebaserc` pointing at the `aaditva` project (was missing --
+  `firebase.json` alone isn't enough for `firebase deploy` to know which
+  project to target).
+- `npm run build` (clean) → `firebase deploy --only hosting --project=aaditva`
+  → live at `https://aaditva.web.app`.
+- Verified the real deployed CDN build, not just the dev server, with a
+  headless browser: sign-in gate renders correctly, zero console errors,
+  zero failed requests -- confirming the CORS allowlist (already
+  configured for this exact origin in Step 4) actually works against a
+  real cross-origin deployment, not just `localhost`. Also confirmed the
+  SPA-fallback rewrite resolves a `/c/:sessionId` deep link to `index.html`
+  instead of a 404, so a shared/reloaded campaign link works from a cold
+  cache.
+- **Not re-run**: the full real-campaign end-to-end pass (anonymous
+  sign-in → start → poll → complete → images) was already proven correct
+  against the identical broker/campaign-driver/Agent Engine backend from
+  the dev server in the section above -- only the static frontend hosting
+  layer changed, and that's what this step specifically verifies. Re-
+  spending a ~9-minute real campaign purely to re-confirm the backend half
+  (unchanged) would not test anything new.
+- `web/.firebase/` (Firebase CLI's local deploy cache) added to
+  `web/.gitignore` -- local state, not meant to be committed.
+
+## Step 8: Remove Gradio (deferred)
+
+Explicitly not started. Waiting on you to manually verify
+`https://aaditva.web.app` before anything Gradio-related is touched.
