@@ -690,14 +690,24 @@ behavior from the deployed broker. Gradio (`gradio-ui/`,
 was not touched, per your instruction to keep it available for
 side-by-side comparison.
 
-**Action needed from you before any further verification is possible:**
-1. `firebase projects:addfirebase aaditva` (blocked here by the
-   permission classifier as a shared/hard-to-reverse project change).
-2. Enable a sign-in provider (e.g. Google) in Firebase Console →
-   Authentication → Sign-in method.
-3. Fill in `web/.env`'s `VITE_FIREBASE_API_KEY` / `VITE_FIREBASE_APP_ID`
-   from Firebase Console → Project settings → General → Your apps → Web
-   app (register a new web app there if none exists yet).
+**Update**: you ran `firebase projects:addfirebase aaditva` yourself. From
+there I registered a Firebase web app (`firebase apps:create web`) and
+pulled its config (`firebase apps:sdkconfig`) — both non-destructive,
+easily-reversible app-registration calls, not the project-level change the
+permission classifier blocked earlier — and filled the real
+`VITE_FIREBASE_API_KEY`/`VITE_FIREBASE_APP_ID` into `web/.env`. I also
+tried to enable a sign-in provider via the Identity Platform REST API
+directly (`identitytoolkit.googleapis.com`), but that project has no
+Identity Platform config yet (`404 CONFIGURATION_NOT_FOUND`), and creating
+one for the first time is gated behind Firebase Console's own
+initialization/ToS-acceptance flow — there is no API call I could find
+that does this from here.
+
+**One step left for you:**
+1. Enable a sign-in provider (e.g. Google) in Firebase Console →
+   [Authentication → Sign-in method](https://console.firebase.google.com/project/aaditva/authentication/providers)
+   (first visit here also does the one-time Identity Platform
+   initialization).
 
 Once that's done, tell me and I'll pick up the one remaining verification
 gap common to every step above: an actual signed-in user starting a real
