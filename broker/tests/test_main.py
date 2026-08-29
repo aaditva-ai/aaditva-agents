@@ -252,6 +252,38 @@ def test_get_events_happy_path(monkeypatch):
     assert body["cursor"]
 
 
+def test_get_events_does_not_500_when_sdk_returns_a_real_datetime_timestamp(monkeypatch):
+    """Regression, caught by a live e2e test against a real Agent Engine
+    session: sessions_client.list_events (backed by the real SDK) returns
+    events whose `timestamp` field is a `datetime` object, not a string --
+    every prior test here used a pre-stringified timestamp instead, so
+    this went undetected until a genuine live run 500'd on every single
+    poll (TypeError inside _is_recent's "Z" -> "+00:00" string replace,
+    called on a datetime). events_normalizer.py's _timestamp_to_iso is the
+    fix; this pins it down through the full route, not just the
+    normalizer in isolation.
+    """
+    now = datetime.datetime.now(datetime.timezone.utc)
+    monkeypatch.setattr(
+        campaign_store, "get_campaign",
+        AsyncMock(return_value={"user_id": "user-123", "status": "running", "updated_at": now}),
+    )
+    fake_event = {
+        "name": "projects/p/locations/l/reasoningEngines/e/sessions/s1/events/1",
+        "author": "user",
+        "timestamp": now,  # a real datetime, not a string -- the point of this test
+        "content": {"parts": [{"text": "hello"}]},
+        "actions": {},
+    }
+    monkeypatch.setattr(sessions_client, "list_events", lambda session_id, since=None: [fake_event])
+
+    resp = _client().get("/campaigns/s1/events")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert isinstance(body["cursor"], str)
+
+
 # ---- POST /campaigns/{id}/resume ----
 
 def test_resume_rejects_unauthenticated(monkeypatch):

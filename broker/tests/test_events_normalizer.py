@@ -6,6 +6,7 @@ by scripts/spikes/ against the live Agent Engine (snake_case field names:
 `.../events/{id}` resource path) -- not guessed at, since Step 1 confirmed
 the exact wire shape before any of this was written.
 """
+import datetime
 import sys
 from pathlib import Path
 
@@ -183,3 +184,30 @@ def test_invocation_id_is_carried_onto_every_step_from_that_event():
 def test_event_with_no_content_and_no_actions_produces_no_steps():
     events = [{"name": f"{SESSION_PREFIX}/11", "author": "user", "timestamp": "t"}]
     assert normalize_events(events) == []
+
+
+def test_timestamp_as_a_real_datetime_object_is_normalized_to_an_iso_string():
+    """Regression, caught live: the real Agent Engine SDK returns
+    `event.timestamp` as a `datetime` object, not a string -- every test
+    fixture up to this point (including this file's own `_event` helper)
+    used a plain string, so this went unnoticed until a genuine end-to-end
+    test against a live session hit
+    `broker/main.py`'s `_is_recent` calling `.replace("Z", "+00:00")` on
+    what turned out to be a `datetime` (matching `datetime.replace()`'s
+    keyword-only signature instead of `str.replace()`, producing
+    `TypeError: 'str' object cannot be interpreted as an integer`). Every
+    downstream consumer of `Step.timestamp` (broker/main.py, the SPA's
+    JSON response) requires a plain string, so normalize_events must
+    always emit one regardless of what the caller passed in.
+    """
+    dt = datetime.datetime(2026, 8, 29, 16, 10, 8, 123456, tzinfo=datetime.timezone.utc)
+    events = [{
+        "name": f"{SESSION_PREFIX}/12",
+        "author": "user",
+        "timestamp": dt,
+        "content": {"parts": [{"text": "hi"}]},
+        "actions": {},
+    }]
+    steps = normalize_events(events)
+    assert steps[0]["timestamp"] == "2026-08-29T16:10:08.123456Z"
+    assert isinstance(steps[0]["timestamp"], str)

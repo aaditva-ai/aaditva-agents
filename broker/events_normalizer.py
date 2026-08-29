@@ -44,6 +44,28 @@ def _get(obj: Any, name: str, default=None):
     return getattr(obj, name, default)
 
 
+def _timestamp_to_iso(value: Any) -> str | None:
+    """The live SDK's `event.timestamp` is a `datetime` object, not a
+    string -- confirmed against a real Agent Engine session during Step 6
+    live e2e testing, which every prior test fixture (all hand-written
+    with string timestamps) never exercised. broker/main.py's staleness
+    logic (`_is_recent`) and the JSON response body both need a plain
+    RFC3339 string, so every timestamp is normalized here, once, at the
+    normalizer boundary -- rather than pushing datetime-vs-string handling
+    onto every downstream consumer.
+    """
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        iso = value.isoformat()
+        # datetime.isoformat() renders UTC as "+00:00", not "Z" -- keep the
+        # "Z" convention the rest of the codebase (and every prior test
+        # fixture) already uses, since main.py's _is_recent does a literal
+        # "Z" -> "+00:00" string replace that would otherwise double up.
+        return iso.replace("+00:00", "Z")
+    return str(value)
+
+
 def _event_id(event: Any) -> str:
     """The trailing `/events/{id}` segment of `name` is the natural dedupe
     key -- stable across polls/replays and unique per event.
@@ -112,7 +134,7 @@ def normalize_events(events: list[Any]) -> list[dict]:
 
         event_id = _event_id(event)
         author = _get(event, "author")
-        timestamp = _get(event, "timestamp")
+        timestamp = _timestamp_to_iso(_get(event, "timestamp"))
         # invocation_id groups every event from one orchestrator turn (one
         # user message through to its final response) -- Step 1's harvested
         # sessions show `author` is "creative_director" for nearly every

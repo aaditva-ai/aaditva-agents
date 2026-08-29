@@ -767,3 +767,66 @@ total cost the way it does for a signed-in Google account.
   sign-in via the SPA end-to-end (Google and Anonymous are now both
   enabled per your message, so this is unblocked — folded into the same
   end-to-end verification pass noted above once you confirm you're ready).
+
+## End-to-end verification against the live deployed stack
+
+Ran the real thing: a headless browser drove the actual SPA dev server,
+signed in anonymously against the real `aaditva` Firebase project,
+submitted a real campaign brief, and polled the real deployed broker for
+~8.5 minutes until the campaign completed.
+
+**A real bug was caught live, on the first genuine end-to-end run, that no
+prior unit test caught**: every poll to `GET /campaigns/{id}/events`
+500'd with `TypeError: 'str' object cannot be interpreted as an integer`
+inside `_is_recent`. Root cause: the real Agent Engine SDK returns
+`event.timestamp` as a `datetime` object, not a string — every test
+fixture written across Steps 3–6 (all hand-authored) used a pre-
+stringified timestamp, so this was invisible to 53 passing unit tests and
+to the normalizer's earlier validation against Step 1's harvested *JSON
+dumps* (which serialize datetimes to strings on the way to disk, silently
+masking the exact type this bug depended on). `_is_recent`'s `.replace("Z",
+"+00:00")` matched `datetime.replace()`'s keyword-only signature instead
+of `str.replace()`, producing the exact error.
+
+**Fixed live, mid-test, without losing the run**: added
+`events_normalizer.py`'s `_timestamp_to_iso` (converts any `datetime` --
+or already-a-string -- to a consistent `"...Z"`-suffixed ISO string at the
+normalizer boundary, once, rather than pushing datetime-vs-string handling
+onto every downstream consumer) and redeployed the broker while the real
+campaign kept running server-side, completely unaffected by the broker's
+outage -- exactly the architecture's central claim (Key Decision #1)
+holding up under an actual failure, not just a designed-in one. The SPA's
+own resilience also held: `CampaignRoute`'s "Reconnecting…" banner (Step
+6) was live on screen the whole time the broker was 500ing, backing off
+per `queries.ts`'s retry policy, then silently recovered the moment the
+redeploy landed -- no user action, no lost state, no reload needed.
+Two regression tests added
+(`test_timestamp_as_a_real_datetime_object_is_normalized_to_an_iso_string`
+in `test_events_normalizer.py`, `test_get_events_does_not_500_when_sdk_
+returns_a_real_datetime_timestamp` in `test_main.py`); 53 broker tests
+now pass.
+
+**Confirmed working, live, end-to-end, after the fix**:
+- Anonymous sign-in through the real SPA against the real Firebase project.
+- `POST /campaigns` → real Cloud Tasks dispatch → real campaign-driver
+  drive → real Agent Engine campaign, all the way through
+  `brand_strategist` → `copywriter` → `designer` → `display_image` (×6) →
+  `critic` → `designer` (revision) → `display_image` (×2) →
+  `get_image_links` → `project_manager` → final summary (22 raw events, 39
+  normalized steps).
+- The URL (`/c/{sessionId}`) is genuinely the only client-held handle --
+  confirmed by reloading mid-campaign and watching the transcript rebuild
+  from zero client state.
+- Image rendering: `get_image_links` produced 3 signed URLs; independently
+  fetched all 3 outside the browser and confirmed real `image/png` content
+  (1.1–1.4MB each) -- the exact defect (`[display_image]` chips, no
+  imagery) this whole redesign exists to fix.
+- Zero uncaught browser-side JS errors at any point in the run.
+
+**Still not exercised live**: the anonymous lifetime cap actually
+refusing a 4th trigger through the SPA (would cost 3 more real campaign
+dispatches just to prove admission logic already validated directly
+against Firestore in the prior section -- not worth the spend), and the
+Resume button (no failure/stall occurred in this run to trigger it
+against). Both are covered by unit/integration tests; only the live
+button-click path is unexercised.
