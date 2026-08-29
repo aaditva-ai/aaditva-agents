@@ -30,7 +30,7 @@ def test_user_text_event_becomes_text_step():
     events = [_event("1", "user", [{"text": "Create a campaign for X"}])]
     steps = normalize_events(events)
     assert steps == [{
-        "id": "1:0", "author": "user", "kind": "text",
+        "id": "1:0", "author": "user", "invocationId": None, "kind": "text",
         "text": "Create a campaign for X", "timestamp": "2026-08-29T00:00:00Z",
     }]
 
@@ -128,7 +128,10 @@ def test_compaction_event_is_filtered_raw_fallback():
 def test_transfer_with_no_content_parts_still_surfaces():
     events = [_event("9", "creative_director", [], actions={"transfer_agent": "designer"})]
     steps = normalize_events(events)
-    assert steps == [{"id": "9:transfer", "author": "creative_director", "kind": "transfer", "timestamp": "2026-08-29T00:00:00Z"}]
+    assert steps == [{
+        "id": "9:transfer", "author": "creative_director", "invocationId": None,
+        "kind": "transfer", "timestamp": "2026-08-29T00:00:00Z",
+    }]
 
 
 def test_multiple_parts_in_one_event_each_get_distinct_ids():
@@ -166,6 +169,15 @@ def test_dedupe_is_idempotent_across_overlapping_cursor_pages():
 
 def test_empty_events_list_returns_empty_steps():
     assert normalize_events([]) == []
+
+
+def test_invocation_id_is_carried_onto_every_step_from_that_event():
+    events = [
+        {**_event("20", "creative_director", [{"text": "calling strategist"}]), "invocation_id": "inv-1"},
+        {**_event("21", "creative_director", [{"text": "calling copywriter"}]), "invocation_id": "inv-2"},
+    ]
+    steps = normalize_events(events)
+    assert [s["invocationId"] for s in steps] == ["inv-1", "inv-2"]
 
 
 def test_event_with_no_content_and_no_actions_produces_no_steps():

@@ -1,0 +1,148 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+.centered-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  gap: 1rem;
+  text-align: center;
+}
+
+.home-page,
+.campaign-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.home-header,
+.campaign-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.brief-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 2rem;
+}
+
+.brief-form textarea {
+  font-family: inherit;
+  font-size: 1rem;
+  padding: 0.75rem;
+  resize: vertical;
+}
+
+.error-text {
+  color: #c0392b;
+}
+
+.recent-campaigns ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.recent-campaigns a {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+}
+
+.status-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.status-dispatched { background: #f1c40f; }
+.status-running { background: #3498db; }
+.status-complete { background: #2ecc71; }
+.status-failed { background: #e74c3c; }
+
+.status-banner {
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.status-banner-info { background: #eaf2fb; }
+.status-banner-success { background: #eafaf1; }
+.status-banner-warning { background: #fff8e1; }
+.status-banner-error { background: #fdecea; }
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.step-card {
+  border: 1px solid rgba(127, 127, 127, 0.25);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+
+.step-card-author {
+  font-weight: 600;
+  font-size: 0.85rem;
+  opacity: 0.7;
+  margin-bottom: 0.4rem;
+  text-transform: capitalize;
+}
+
+.step-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.step-text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.tool-chip {
+  display: inline-block;
+  font-size: 0.85rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.12);
+  width: fit-content;
+}
+.tool-chip-call { color: #2980b9; }
+.tool-chip-result { color: #27ae60; cursor: pointer; }
+.tool-chip-transfer { color: #8e44ad; }
+
+.image-tile {
+  margin: 0;
+}
+.image-tile img {
+  max-width: 100%;
+  border-radius: 0.5rem;
+}
+.image-tile figcaption {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  margin-top: 0.25rem;
+}

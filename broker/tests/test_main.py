@@ -157,6 +157,30 @@ def test_get_events_no_new_steps_uses_since_not_stale_doc_updated_at(monkeypatch
     assert resp.json()["status"] == "running"
 
 
+def test_get_events_cursor_is_never_null_for_a_dispatched_campaign_with_no_events_yet(monkeypatch):
+    """Regression: the SPA advances its poll via useInfiniteQuery's
+    fetchNextPage(), whose underlying fetch is a no-op when the page param
+    (this cursor) is null and a page already exists (see
+    @tanstack/query-core's infiniteQueryBehavior.ts). A null cursor here
+    the first time a freshly-dispatched campaign (no events, no `since`
+    yet) is polled would silently and permanently stop the SPA's poll.
+    """
+    now = datetime.datetime.now(datetime.timezone.utc)
+    monkeypatch.setattr(
+        campaign_store, "get_campaign",
+        AsyncMock(return_value={"user_id": "user-123", "status": "dispatched", "updated_at": now}),
+    )
+    monkeypatch.setattr(sessions_client, "list_events", lambda session_id, since=None: [])
+
+    resp = _client().get("/campaigns/s1/events")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "starting"
+    assert body["steps"] == []
+    assert body["cursor"] is not None
+
+
 def test_get_events_happy_path(monkeypatch):
     now = datetime.datetime.now(datetime.timezone.utc)
     monkeypatch.setattr(
@@ -180,6 +204,139 @@ def test_get_events_happy_path(monkeypatch):
     assert len(body["steps"]) == 1
     assert body["steps"][0]["kind"] == "text"
     assert body["cursor"]
+
+
+# ---- POST /campaigns/{id}/resume ----
+
+def test_resume_rejects_unauthenticated(monkeypatch):
+    def _raise(header):
+        raise auth.AuthError("bad token")
+    monkeypatch.setattr(auth, "verify_id_token", _raise)
+    resp = _client().post("/campaigns/s1/resume")
+    assert resp.status_code == 401
+
+
+def test_resume_404_when_campaign_missing(monkeypatch):
+    monkeypatch.setattr(campaign_store, "get_campaign", AsyncMock(return_value=None))
+    resp = _client().post("/campaigns/s1/resume")
+    assert resp.status_code == 404
+
+
+def test_resume_404_when_owned_by_different_user(monkeypatch):
+    monkeypatch.setattr(
+        campaign_store, "get_campaign",
+        AsyncMock(return_value={"user_id": "someone-else", "status": "failed"}),
+    )
+    resp = _client().post("/campaigns/s1/resume")
+    assert resp.status_code == 404
+
+
+def test_resume_rejects_when_derived_status_is_running(monkeypatch):
+    """doc status "running" with a fresh event must block resume -- it's
+    genuinely still in progress.
+    """
+    now = datetime.datetime.now(datetime.timezone.utc)
+    monkeypatch.setattr(
+        campaign_store, "get_campaign",
+        AsyncMock(return_value={"user_id": "user-123", "status": "running", "updated_at": now}),
+    )
+    fresh_event = {
+        "name": "projects/p/locations/l/reasoningEngines/e/sessions/s1/events/1",
+        "author": "creative_director",
+        "timestamp": now.isoformat().replace("+00:00", "Z"),
+        "content": {"parts": [{"text": "working"}]},
+        "actions": {},
+    }
+    monkeypatch.setattr(sessions_client, "list_events", lambda session_id, since=None: [fresh_event])
+    enqueue = AsyncMock()
+    monkeypatch.setattr(campaign_queue, "enqueue", enqueue)
+
+    resp = _client().post("/campaigns/s1/resume")
+
+    assert resp.status_code == 409
+    enqueue.assert_not_awaited()
+
+
+def test_resume_rejects_complete_campaign(monkeypatch):
+    monkeypatch.setattr(
+        campaign_store, "get_campaign",
+        AsyncMock(return_value={"user_id": "user-123", "status": "complete"}),
+    )
+    monkeypatch.setattr(sessions_client, "list_events", lambda session_id, since=None: [])
+    enqueue = AsyncMock()
+    monkeypatch.setattr(campaign_queue, "enqueue", enqueue)
+
+    resp = _client().post("/campaigns/s1/resume")
+
+    assert resp.status_code == 409
+    enqueue.assert_not_awaited()
+
+
+def test_resume_allowed_for_doc_status_running_but_actually_stalled(monkeypatch):
+    """The scenario this route exists for: campaign-driver crashed without
+    ever writing `failed`, so the doc still says "running" -- but the last
+    event is old enough that the derived status is "stalled", which must
+    be resumable.
+    """
+    long_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
+    monkeypatch.setattr(
+        campaign_store, "get_campaign",
+        AsyncMock(return_value={"user_id": "user-123", "status": "running", "updated_at": long_ago}),
+    )
+    stale_event = {
+        "name": "projects/p/locations/l/reasoningEngines/e/sessions/s1/events/1",
+        "author": "creative_director",
+        "timestamp": long_ago.isoformat().replace("+00:00", "Z"),
+        "content": {"parts": [{"text": "stuck here"}]},
+        "actions": {},
+    }
+    monkeypatch.setattr(sessions_client, "list_events", lambda session_id, since=None: [stale_event])
+    monkeypatch.setattr(campaign_limits, "check_admission", AsyncMock(return_value={"allowed": True}))
+    enqueue = AsyncMock()
+    monkeypatch.setattr(campaign_queue, "enqueue", enqueue)
+
+    resp = _client().post("/campaigns/s1/resume")
+
+    assert resp.status_code == 200
+    enqueue.assert_awaited_once()
+
+
+def test_resume_happy_path_for_failed_campaign(monkeypatch):
+    monkeypatch.setattr(
+        campaign_store, "get_campaign",
+        AsyncMock(return_value={"user_id": "user-123", "status": "failed"}),
+    )
+    monkeypatch.setattr(sessions_client, "list_events", lambda session_id, since=None: [])
+    monkeypatch.setattr(campaign_limits, "check_admission", AsyncMock(return_value={"allowed": True}))
+    enqueue = AsyncMock()
+    monkeypatch.setattr(campaign_queue, "enqueue", enqueue)
+
+    resp = _client().post("/campaigns/s1/resume")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok", "sessionId": "s1"}
+    enqueue.assert_awaited_once()
+    assert enqueue.await_args.args[0] == "s1"
+    assert enqueue.await_args.args[1] == "user-123"
+
+
+def test_resume_returns_429_when_rate_limited(monkeypatch):
+    monkeypatch.setattr(
+        campaign_store, "get_campaign",
+        AsyncMock(return_value={"user_id": "user-123", "status": "failed"}),
+    )
+    monkeypatch.setattr(sessions_client, "list_events", lambda session_id, since=None: [])
+    monkeypatch.setattr(
+        campaign_limits, "check_admission",
+        AsyncMock(return_value={"allowed": False, "status": "error", "error": "rate_limited: too many"}),
+    )
+    enqueue = AsyncMock()
+    monkeypatch.setattr(campaign_queue, "enqueue", enqueue)
+
+    resp = _client().post("/campaigns/s1/resume")
+
+    assert resp.status_code == 429
+    enqueue.assert_not_awaited()
 
 
 # ---- _derive_status ----

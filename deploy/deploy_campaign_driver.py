@@ -76,7 +76,7 @@ async def ensure_service_account(sa_name: str, display_name: str, project_id: st
     ])
     if rc == 0:
         print(f"   ✓ Created service account {sa_email}")
-    elif "ALREADY_EXISTS" in err:
+    elif "ALREADY_EXISTS" in err or "subject of a conflict" in err:
         print(f"   ✓ Service account {sa_email} already exists")
     else:
         print(f"   ⚠️  Could not create service account {sa_name}: {err.strip()}")

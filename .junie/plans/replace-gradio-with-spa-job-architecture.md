@@ -524,3 +524,184 @@ it can be compared side-by-side with the new SPA before Step 7 removes it.
   note), sign in via the SPA (Step 4) and confirm `POST /campaigns` →
   `GET /campaigns/{id}/events` renders a real campaign end-to-end through
   the broker — this closes the one gap live testing couldn't reach here.
+
+## Step 4: SPA shell with auth + TanStack Query data layer
+
+- **The SPA calls the broker's absolute Cloud Run URL directly
+  (`VITE_BROKER_URL`), not through a same-origin Firebase Hosting
+  rewrite.** The plan's Proposed Changes described a `firebase.json`
+  rewrite routing `/api/**` to the broker, but the broker's routes were
+  already built and live-validated at `/campaigns` (not `/api/campaigns`)
+  in Step 3. Renaming routes to fit an unwritten, unvalidated rewrite
+  would have meant re-testing already-working, already-deployed
+  infrastructure for no functional benefit. Instead, CORS
+  (`starlette.middleware.cors.CORSMiddleware`, allowlist via the new
+  `BROKER_ALLOWED_ORIGINS` env var) was added to the broker and the broker
+  was redeployed and live-verified: an `OPTIONS` preflight from
+  `http://localhost:5173` returns `200` with the right
+  `Access-Control-Allow-*` headers, and an unauthenticated `GET
+  /campaigns` still correctly returns `401` post-redeploy. `firebase.json`
+  keeps only the SPA-fallback rewrite (`** -> /index.html`) needed for
+  `/c/:sessionId` deep-links.
+- **A misconfigured/missing Firebase config no longer white-screens the
+  app.** `firebase.ts`'s `initializeApp`/`getAuth` throw synchronously on
+  an invalid API key — confirmed for real with a headless Playwright smoke
+  test against the actual dev server before this fix (uncaught
+  `FirebaseError: auth/invalid-api-key`, blank body). Since Firebase Auth
+  is not yet set up for this project (see Step 2's pending manual step),
+  this was a certainty, not an edge case, so `firebase.ts` now exposes
+  `isFirebaseConfigured` and only calls `initializeApp`/`getAuth` when the
+  config looks real; `AuthProvider` skips its Firebase calls entirely
+  when not configured (staying in `loading: true` rather than crashing);
+  `SignInGate` checks `isFirebaseConfigured` and renders an explicit "not
+  configured yet" message instead of the sign-in button. Re-verified with
+  the same headless smoke test after the fix: zero uncaught errors in both
+  the unconfigured and (a temporarily faked) configured state.
+- **Playwright was added as a devDependency** specifically to make the
+  above kind of check possible without asking you to manually open a
+  browser — useful for any future verification pass on this SPA, not just
+  this one bug.
+
+## Step 5: transcript rendering from a cursor-paged infinite query — a real bug in the plan's own reference snippet
+
+- **`refetchInterval` on `useInfiniteQuery` does not advance the cursor —
+  the plan's own Data Models / Contracts code sample for
+  `useCampaignEvents` would not have worked as polling.** This was caught
+  by reading `@tanstack/query-core`'s actual source
+  (`infiniteQueryBehavior.ts`) before shipping the polling code, not by
+  observing a failure at runtime. The mechanism: TanStack Query v5's
+  automatic background refetch (`refetchInterval`, focus/reconnect
+  refetch) calls the *base* `refetch()`, which re-fetches every
+  already-fetched page starting from `oldPageParams[0]` — i.e. the
+  *first* page's original param, not a new one. Only `fetchNextPage()`
+  passes `meta.fetchMore.direction: 'forward'`, which is what the
+  library's `onFetch` handler checks to decide to fetch a genuinely new
+  page via `getNextPageParam`. A bare `refetchInterval` on a
+  `useInfiniteQuery`, as the plan's snippet showed, would therefore have
+  silently polled the *same first page* (with `since=undefined`) forever,
+  never picking up new events.
+- **Fix: `useCampaignEvents` polls via a `useEffect` + `setInterval` that
+  calls `fetchNextPage()`, gated on the derived status not being
+  terminal**, rather than the `refetchInterval` option. `stalled` keeps
+  polling deliberately (Functional Requirement 5's stall can resolve on
+  its own). `refetchOnWindowFocus` was disabled for this query
+  specifically, since a focus-triggered refetch would hit the exact same
+  re-fetch-from-page-0 issue.
+- **A second bug this exposed, on the broker side: `cursor` must never be
+  `null` once a campaign has been dispatched.** `fetchNextPage()`'s
+  underlying fetch is a no-op when the page param is `null` *and* a page
+  already exists (same source file) — so the very first poll of a
+  `dispatched` campaign with zero events and no `since` yet, which
+  previously computed `next_cursor = None`, would have permanently frozen
+  the SPA's poll the first time that state was ever reached. Fixed by
+  falling back to the current UTC timestamp (`_utc_now_rfc3339`, matching
+  `scripts/spikes/common.py`'s helper) when there is truly nothing else to
+  cursor from. Covered by
+  `test_get_events_cursor_is_never_null_for_a_dispatched_campaign_with_no_events_yet`.
+  Both bugs were caught during implementation, before any live SPA/broker
+  integration test could have surfaced them empirically — reading the
+  actual polling library's source before writing against its documented-
+  but-ambiguous behavior directly prevented a real gap in Step 6's
+  eventual live verification pass.
+- **`selectTranscript` groups by `author` + `invocationId`, not `author`
+  alone**, despite the plan's own text also just saying "author" in one
+  place — real harvested sessions from Step 1 show nearly every event past
+  the first is authored `"creative_director"` regardless of which
+  specialist it's relaying, so grouping by author alone collapses an
+  entire ~30-step campaign into one giant card. `invocationId` (added to
+  `events_normalizer.py`'s step shape, carried straight from the raw
+  event's `invocation_id`) is what actually distinguishes one orchestrator
+  turn from the next. Verified against real data: the 34-step harvested
+  session from Step 1 groups into 10 sensible cards (1–5 steps each) with
+  `invocationId`, versus 1 single 54-step card without it.
+- **Verified**: `selectTranscript.test.ts` (7 tests: page accumulation, id
+  dedupe across overlapping pages, author+invocationId grouping,
+  starting-status default, purity/determinism) and `queries.test.tsx` (3
+  tests using fake timers + `@testing-library/react`, asserting on the
+  actual network-call sequence rather than TanStack Query internals: the
+  cursor genuinely advances tick-over-tick, polling stops on `complete`,
+  polling continues through `stalled`). Full production build (`tsc -b &&
+  vite build`) and a headless Playwright load both succeed with zero
+  console errors. **Not verified**: an actual live campaign rendering
+  through the real broker (blocked on Firebase Auth, same as Steps 2–3).
+
+## Step 6: failure/stall/resume handling
+
+- **Added a `POST /campaigns/{sessionId}/resume` broker route** not
+  explicitly named as a route in the plan's original three-route broker
+  description, but required by Functional Requirement 3's "offered a
+  Resume action" and Step 6's `useResumeCampaign` — the plan's Proposed
+  Changes section only lists the three original routes, so this is an
+  addition, not a deviation from something specified. Re-enqueues a drive
+  task on the *same* session (never calls `create_dispatched`, which would
+  reset `created_at`/overwrite `prompt`), subject to the same per-user
+  rate/concurrency admission check as starting a new campaign.
+- **Resume eligibility is computed from the *derived* status, not the raw
+  Firestore doc status — a bug caught by a test before it ever shipped.**
+  The obvious-looking implementation (block resume when
+  `doc.status in ("running", "complete")`) is wrong: a campaign-driver
+  crash never gets a chance to write `failed` to Firestore (Step 2's
+  `mark_failed` only runs from the driver's own exception handler, which a
+  killed container never reaches), so a genuinely stalled campaign's
+  document reads `"running"` forever. Blocking on the raw doc status would
+  have made every real stall permanently unresumable — exactly the
+  failure mode Functional Requirement 5 exists to prevent. Fixed by
+  extracting `_fetch_steps_and_status` (shared with `handle_get_events`)
+  and checking its *derived* status instead, so `stalled` (doc says
+  `running`, but events are stale) is correctly resumable while a truly
+  `running` campaign (doc says `running`, events are fresh) is not.
+  Covered by `test_resume_allowed_for_doc_status_running_but_actually_stalled`,
+  written specifically to pin this down.
+- **`StatusBanner`/`CampaignRoute` derive the Resume button's visibility
+  from `RESUMABLE_STATUSES = {"failed", "stalled"}`** on the client,
+  matching the broker's own guard — a `409` from the broker on a stale
+  client render (e.g. the campaign completed between polls) is still
+  possible and surfaces as `resume.isError`, but the common case never
+  shows a Resume button on a healthy campaign in the first place.
+  `resume.isPending` disables the button during the request, and
+  `useResumeCampaign`'s `onSuccess` invalidates the events query so the
+  next tick picks up the fresh state immediately rather than waiting out
+  the poll interval.
+- **The already-fetched transcript never disappears on a transient
+  error**: `CampaignRoute` renders `query.isError` as a small
+  "Reconnecting… (attempt N)" banner *above* the existing
+  `TranscriptView`, never replacing it — structurally ruling out the
+  `gradio-ui/app.py:426`/`:625` defect (one error bubble wiping the whole
+  transcript) rather than just avoiding it by convention, since there is
+  no code path in `CampaignRoute` that clears `query.data` on error.
+- **Verified**: `broker/tests/test_main.py`'s resume tests (7 cases:
+  unauthenticated, not-found, ownership, blocked-by-running,
+  blocked-by-complete, allowed-when-actually-stalled, happy path,
+  rate-limited) plus the full `selectTranscript`/`queries` suites from
+  Step 5. **Not verified live**: an actual resume against a real stalled
+  campaign end-to-end through the SPA (blocked on Firebase Auth, same as
+  every prior step's live-auth gap).
+
+## What remains before Step 7 (cutover)
+
+All of Steps 2–6 are built, unit-tested (64 tests total across
+`campaign-driver`, `broker`, and `web`), and — everywhere not blocked on
+Firebase Auth — verified against live GCP infrastructure: real Cloud Run
+deployments, a real Cloud Tasks queue, a real end-to-end campaign driven
+to completion with no client attached, real Firestore reads/writes
+including a caught-and-fixed missing composite index, and real CORS/401
+behavior from the deployed broker. Gradio (`gradio-ui/`,
+`deploy/deploy_gradio.py`, the `creative-director-ui` Cloud Run service)
+was not touched, per your instruction to keep it available for
+side-by-side comparison.
+
+**Action needed from you before any further verification is possible:**
+1. `firebase projects:addfirebase aaditva` (blocked here by the
+   permission classifier as a shared/hard-to-reverse project change).
+2. Enable a sign-in provider (e.g. Google) in Firebase Console →
+   Authentication → Sign-in method.
+3. Fill in `web/.env`'s `VITE_FIREBASE_API_KEY` / `VITE_FIREBASE_APP_ID`
+   from Firebase Console → Project settings → General → Your apps → Web
+   app (register a new web app there if none exists yet).
+
+Once that's done, tell me and I'll pick up the one remaining verification
+gap common to every step above: an actual signed-in user starting a real
+campaign through the deployed SPA and broker, watching it render live,
+reloading mid-campaign, and (if a stall or failure is reproducible)
+exercising the Resume button — closing the loop before Step 7 removes
+Gradio.

@@ -113,6 +113,13 @@ def normalize_events(events: list[Any]) -> list[dict]:
         event_id = _event_id(event)
         author = _get(event, "author")
         timestamp = _get(event, "timestamp")
+        # invocation_id groups every event from one orchestrator turn (one
+        # user message through to its final response) -- Step 1's harvested
+        # sessions show `author` is "creative_director" for nearly every
+        # event past the first, so the SPA's step-card grouping needs
+        # invocation_id alongside author or the whole transcript collapses
+        # into one card (see web/src/api/selectTranscript.ts).
+        invocation_id = _get(event, "invocation_id")
         content = _get(event, "content")
         parts = _get(content, "parts") or []
 
@@ -128,6 +135,7 @@ def normalize_events(events: list[Any]) -> list[dict]:
                     steps.append({
                         "id": f"{event_id}:{part_index}",
                         "author": author,
+                        "invocationId": invocation_id,
                         "kind": "tool_call",
                         "toolName": name,
                         "timestamp": timestamp,
@@ -143,6 +151,7 @@ def normalize_events(events: list[Any]) -> list[dict]:
                         steps.append({
                             "id": f"{event_id}:{part_index}",
                             "author": author,
+                            "invocationId": invocation_id,
                             "kind": "image",
                             "imageUrl": image["url"],
                             "text": image.get("title"),
@@ -153,6 +162,7 @@ def normalize_events(events: list[Any]) -> list[dict]:
                     steps.append({
                         "id": f"{event_id}:{part_index}",
                         "author": author,
+                        "invocationId": invocation_id,
                         "kind": "tool_result",
                         "toolName": name,
                         "text": _stringify_response(response),
@@ -165,6 +175,7 @@ def normalize_events(events: list[Any]) -> list[dict]:
                 steps.append({
                     "id": f"{event_id}:{part_index}",
                     "author": author,
+                    "invocationId": invocation_id,
                     "kind": "text",
                     "text": text,
                     "timestamp": timestamp,
@@ -178,6 +189,7 @@ def normalize_events(events: list[Any]) -> list[dict]:
             steps.append({
                 "id": f"{event_id}:transfer",
                 "author": author,
+                "invocationId": invocation_id,
                 "kind": "transfer",
                 "timestamp": timestamp,
             })

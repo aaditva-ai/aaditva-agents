@@ -64,7 +64,7 @@ async def ensure_service_account(sa_name: str, display_name: str, project_id: st
     ])
     if rc == 0:
         print(f"   ✓ Created service account {sa_email}")
-    elif "ALREADY_EXISTS" in err:
+    elif "ALREADY_EXISTS" in err or "subject of a conflict" in err:
         print(f"   ✓ Service account {sa_email} already exists")
     else:
         print(f"   ⚠️  Could not create service account {sa_name}: {err.strip()}")
@@ -181,6 +181,7 @@ async def deploy() -> None:
     print(f"Deploying {SERVICE_NAME} to Cloud Run in {region}...")
     broker_sa = await ensure_service_account(BROKER_SA_NAME, "Broker", project_id)
 
+    allowed_origins = os.getenv("BROKER_ALLOWED_ORIGINS", "")
     env_vars = {
         "GOOGLE_CLOUD_PROJECT": project_id,
         "CLOUD_RUN_REGION": region,
@@ -189,6 +190,7 @@ async def deploy() -> None:
         "CAMPAIGN_TASK_HANDLER_URL": task_handler_url,
         "CAMPAIGN_TASKS_LOCATION": tasks_location,
         "CAMPAIGN_TASKS_QUEUE": tasks_queue,
+        "BROKER_ALLOWED_ORIGINS": allowed_origins,
     }
     env_vars_file = _write_env_vars_file(env_vars)
 
