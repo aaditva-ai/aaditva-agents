@@ -1,0 +1,52 @@
+"""Thin wrapper around the Agent Engine session store for the broker's
+events route.
+
+Same `vertexai.Client` connection pattern as scripts/spikes/common.py and
+campaign-driver/main.py (plan Key Decision #9: the non-deprecated client
+path, no `stream_query`/`create_session` etc.).
+"""
+import os
+
+PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT_ID")
+LOCATION = (
+    os.environ.get("CLOUD_RUN_REGION")
+    or os.environ.get("GCP_REGION")
+    or os.environ.get("LOCATION", "us-central1")
+)
+AGENT_ENGINE_ID = os.environ.get("AGENT_ENGINE_ID")
+
+_client = None
+
+
+def _agent_engine_resource_name() -> str:
+    if AGENT_ENGINE_ID and AGENT_ENGINE_ID.startswith("projects/"):
+        return AGENT_ENGINE_ID
+    return f"projects/{PROJECT_ID}/locations/{LOCATION}/reasoningEngines/{AGENT_ENGINE_ID}"
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        import vertexai
+        from vertexai import Client
+
+        vertexai.init(project=PROJECT_ID, location=LOCATION)
+        _client = Client(project=PROJECT_ID, location=LOCATION)
+    return _client
+
+
+def session_name(session_id: str) -> str:
+    return f"{_agent_engine_resource_name()}/sessions/{session_id}"
+
+
+def list_events(session_id: str, since: str | None = None) -> list:
+    """Calls sessions.events.list, optionally filtered to timestamp >=
+    `since` (an RFC3339 string). Mirrors scripts/spikes/common.py's
+    list_events, the exact call Step 1 confirmed surfaces events
+    mid-invocation.
+    """
+    client = _get_client()
+    config = {"filter": f'timestamp>="{since}"'} if since else None
+    return list(
+        client.agent_engines.sessions.events.list(name=session_name(session_id), config=config)
+    )

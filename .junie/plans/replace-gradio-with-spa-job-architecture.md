@@ -424,3 +424,103 @@ it can be compared side-by-side with the new SPA before Step 7 removes it.
   infra. 12 unit tests (`campaign-driver/tests/test_main.py`) cover the
   auth/validation/re-entry/retry-vs-complete branching without further
   live calls.
+
+## Step 3: broker API + events_normalizer
+
+- **Image delivery keys off `get_image_links`, not `artifact_delta`
+  resolved server-side**: the plan's Proposed Changes originally described
+  the broker "rewriting `gs://` references to signed URLs" from
+  `actions.artifact_delta`. Step 1's `spike_images` already showed
+  `artifact_delta` carries only `{"filename.png": version}` — no bytes —
+  and that the Creative Director's own `get_image_links` tool call already
+  produces ready-to-use signed HTTPS URLs via the existing
+  `SIGNING_SERVICE_ACCOUNT` path, with all 3 URLs independently confirmed
+  fetchable as `image/png`. `events_normalizer.py` therefore emits `image`
+  steps directly from `get_image_links`'s `function_response`, and treats
+  `artifact_delta` as a signal to ignore rather than something to resolve.
+  This removes an entire chunk of planned broker complexity (no GCS client,
+  no bucket IAM reads needed in the events route itself) — the broker's
+  `SIGNING_SERVICE_ACCOUNT`/URL-signing IAM grant is kept in
+  `deploy_broker.py` regardless, defensively, since Functional Requirement
+  6 still names it as a broker responsibility and a future image path might
+  need it.
+- **Compaction filtering is a no-op today, kept for the future**: Step 1
+  found zero compaction events across every harvested session, including
+  two that ran to full natural completion. `_is_compaction_event` checks
+  both the typed `actions.compaction` field and the `raw_event` fallback
+  and will correctly drop a real compaction event the moment one appears,
+  but there is currently nothing for it to filter. This was not treated as
+  a blocker for Step 3.
+- **Event dedupe key is the trailing `/events/{id}` segment of the event's
+  `name` field, further suffixed with a part-index** (e.g. `"12345:0"`,
+  `"12345:1"`) because a single raw event can carry multiple parts (e.g.
+  two `display_image` calls in one turn), and each needs its own stable id
+  for the SPA's cursor-based dedupe to work at the granularity it renders.
+- **Staleness/stall detection uses `since`, not the campaign document's
+  `updated_at`, when a poll has no new steps** — this was a real bug caught
+  during live testing (see Verification below), not a design guess. The
+  campaign document's `updated_at` is only refreshed on a status
+  *transition* (`dispatched`→`running`→`complete`/`failed`), so on a
+  healthy long-running campaign with a multi-minute gap between specialist
+  calls (confirmed in Step 1: gaps of 2-5 minutes between tool calls are
+  normal), using `updated_at` as the freshness signal would flag the
+  campaign `stalled` well before it actually was. `since` (the client's own
+  last-known cursor, which under the polling contract equals the previous
+  response's `cursor`) is a much closer proxy for "when did anything last
+  happen," and is only abandoned in favor of the campaign document's
+  `updated_at` for the one case where it's actually correct: the very
+  first poll, before any event or `since` value exists yet.
+- **`_derive_status` was simplified to not take a `latest_step_timestamp`
+  argument at all** after fixing the above: whether a campaign is
+  `"starting"` vs `"running"` is answered correctly by the Firestore
+  document's own `status` field (`dispatched` vs `running` —
+  campaign-driver's `mark_running` transitions this *before* streaming a
+  single event), not by whether the current poll's page happened to
+  contain a new step. The original version returned `"stalled"`
+  unconditionally whenever a poll had zero new steps and the doc said
+  `"running"`, regardless of `is_recent` — a second bug in the same
+  function, caught by the regression test that exercises this exact
+  scenario (`test_get_events_no_new_steps_uses_since_not_stale_doc_updated_at`).
+- **Ownership check on `GET /events` returns the same 404 as "session not
+  found"** rather than 403, to avoid confirming to an unauthenticated-but-
+  token-holding caller that a given `sessionId` exists at all.
+- **`/healthz` diagnostic routes are unverifiable from this machine** for
+  reasons unrelated to the code: both `campaign-driver` and `broker`'s
+  `/healthz` return a generic Google 404 (no server-side log entry at all)
+  from this specific development machine's network path, while every real
+  route on both services (`/drive`, `/campaigns`, `/campaigns/{id}/events`)
+  responds correctly and is logged. Running the identical app locally
+  confirms `/healthz` returns `200 {"status":"ok"}` correctly, so this is
+  environmental (a local network intermediary intercepting the literal
+  path `/healthz`), not a deployed bug. Not investigated further since
+  `/healthz` is a diagnostic convenience, not part of the plan's contract.
+- **Verification performed live wherever Firebase Auth wasn't the
+  blocker**: `broker/campaign_store.py` and `broker/campaign_limits.py`
+  were exercised against the real Firestore database (not mocks) —
+  `create_dispatched`, `list_campaigns_for_user`, `count_active_campaigns`,
+  `try_acquire_rate_limit`, and `check_admission`'s rate + concurrency
+  refusal path all round-tripped correctly, including catching and fixing
+  a missing composite index (`list_campaigns_for_user`'s
+  `user_id ==`/`order_by created_at` query needs one; `count_active_campaigns`'s
+  `user_id ==`/`status in [...]` query does not, since it has no
+  `order_by`) — now provisioned automatically by `deploy_broker.py`'s
+  `ensure_firestore_index`. `broker` was deployed live to Cloud Run
+  (`--allow-unauthenticated` at the platform level, since `auth.py` gates
+  every route itself) and confirmed to return real `401` JSON from its own
+  Firebase-token check on unauthenticated `GET`/`POST /campaigns` calls.
+  **What was not verified live**: the fully-authenticated happy path
+  (`verify_id_token` actually accepting a real Firebase ID token,
+  `POST /campaigns` actually enqueueing and `GET /campaigns/{id}/events`
+  actually rendering a live campaign) — this is blocked on the same
+  pending manual step as Step 2's Firebase note (project not yet
+  registered with Firebase, no sign-in provider enabled, so no real ID
+  token can be minted yet). 32 unit tests
+  (`broker/tests/test_main.py` + `test_events_normalizer.py`) cover the
+  full routing/validation/status-derivation/event-normalization logic
+  offline, and the normalizer was additionally run against every real
+  event dump harvested in Step 1 (up to 34 raw events / 54 derived steps
+  per session) with zero duplicate ids and sensible kind distributions.
+  **Action needed from you**: once Firebase Auth is set up (see Step 2's
+  note), sign in via the SPA (Step 4) and confirm `POST /campaigns` →
+  `GET /campaigns/{id}/events` renders a real campaign end-to-end through
+  the broker — this closes the one gap live testing couldn't reach here.

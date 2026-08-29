@@ -1,0 +1,210 @@
+"""Maps raw `sessions.events.list` events to the UI step shape the SPA
+renders, replacing the fragile `startswith`/`endswith` text heuristics in
+gradio-ui/app.py's `stream_chat`.
+
+Grounded in the real event shapes captured by scripts/spikes/ against the
+live Agent Engine (see scripts/spikes/README.md):
+
+- Events expose `author`, `content.parts` (each part may carry a
+  `function_call`, `function_response`, or plain `text`), `actions`, `name`
+  (a full resource path ending in `.../events/{numeric_id}` -- there is no
+  separate short `id` field), and `timestamp`.
+- Compaction was never observed to fire in any harvested session (typed
+  `actions.compaction` is not even exposed by the installed SDK; the
+  `raw_event` fallback never carried it either) -- `_is_compaction_event`
+  is a defensive no-op today, kept so a real compaction event would still
+  be dropped rather than rendered as bogus agent output the moment one
+  does appear.
+- Image delivery: Step 1's spike_images confirmed `actions.artifact_delta`
+  carries no bytes (`{"filename.png": 0}` -- version number only) and is a
+  dead end given the creative_director's default InMemoryArtifactService.
+  The viable path is the `get_image_links` function_response, whose
+  `links[].url` values are already signed HTTPS URLs (the Creative
+  Director calls this tool itself via SIGNING_SERVICE_ACCOUNT -- see
+  agents/creative_director/get_image_links_tool.py). This normalizer
+  therefore emits "image" steps from that tool response directly, rather
+  than resolving artifact_delta server-side as the plan's Proposed Changes
+  originally assumed; see the Step 3 entry in
+  docs/replace-gradio-with-spa-job-architecture.md's Decisions section.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+
+def _get(obj: Any, name: str, default=None):
+    """Attribute access for either a pydantic model or a plain dict --
+    events may arrive as either depending on caller (SDK object vs. an
+    already-JSON-dumped dict), so every accessor below goes through this.
+    """
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
+def _event_id(event: Any) -> str:
+    """The trailing `/events/{id}` segment of `name` is the natural dedupe
+    key -- stable across polls/replays and unique per event.
+    """
+    name = _get(event, "name") or ""
+    if "/events/" in name:
+        return name.rsplit("/events/", 1)[-1]
+    return name or str(id(event))
+
+
+def _is_compaction_event(event: Any) -> bool:
+    """See module docstring: no compaction event has ever been observed on
+    the wire, but this checks both the typed field (should the SDK someday
+    expose it) and the untyped raw_event fallback so a real one is dropped
+    rather than rendered as agent output.
+    """
+    actions = _get(event, "actions")
+    if actions is not None and _get(actions, "compaction") is not None:
+        return True
+    raw = _get(event, "raw_event") or {}
+    if isinstance(raw, dict):
+        raw_actions = raw.get("actions") or {}
+        if isinstance(raw_actions, dict) and "compaction" in raw_actions:
+            return True
+    return False
+
+
+def _has_transfer(event: Any) -> bool:
+    actions = _get(event, "actions")
+    return bool(actions is not None and _get(actions, "transfer_agent"))
+
+
+def _normalize_get_image_links_response(response: Any) -> list[dict]:
+    """Response shape (confirmed in spike_images/spike_resume harvests):
+    {"status": "success", "links": [{"title", "concept", "gcs_uri", "url"}], "signed": bool}
+    """
+    if not isinstance(response, dict):
+        return []
+    links = response.get("links") or []
+    images = []
+    for link in links:
+        url = link.get("url")
+        if not url:
+            continue
+        images.append({"url": url, "title": link.get("title") or link.get("concept")})
+    return images
+
+
+def normalize_events(events: list[Any]) -> list[dict]:
+    """Convert raw session events into the UI step list from the plan's
+    `GET /campaigns/{sessionId}/events` contract:
+
+        {id, author, kind, text?, toolName?, imageUrl?, timestamp}
+
+    kind is one of: "text" | "tool_call" | "tool_result" | "image" | "transfer".
+    One raw event can produce zero, one, or several steps (e.g. an event
+    with two function_call parts, or a get_image_links response with three
+    images, each becomes its own step so the SPA can render/dedupe at the
+    same granularity it groups by).
+    """
+    steps: list[dict] = []
+
+    for event in events:
+        if _is_compaction_event(event):
+            continue
+
+        event_id = _event_id(event)
+        author = _get(event, "author")
+        timestamp = _get(event, "timestamp")
+        content = _get(event, "content")
+        parts = _get(content, "parts") or []
+
+        part_index = 0
+        for part in parts:
+            function_call = _get(part, "function_call")
+            function_response = _get(part, "function_response")
+            text = _get(part, "text")
+
+            if function_call is not None:
+                name = _get(function_call, "name")
+                if name:
+                    steps.append({
+                        "id": f"{event_id}:{part_index}",
+                        "author": author,
+                        "kind": "tool_call",
+                        "toolName": name,
+                        "timestamp": timestamp,
+                    })
+                    part_index += 1
+                continue
+
+            if function_response is not None:
+                name = _get(function_response, "name")
+                response = _get(function_response, "response")
+                if name == "get_image_links":
+                    for image in _normalize_get_image_links_response(response):
+                        steps.append({
+                            "id": f"{event_id}:{part_index}",
+                            "author": author,
+                            "kind": "image",
+                            "imageUrl": image["url"],
+                            "text": image.get("title"),
+                            "timestamp": timestamp,
+                        })
+                        part_index += 1
+                elif name:
+                    steps.append({
+                        "id": f"{event_id}:{part_index}",
+                        "author": author,
+                        "kind": "tool_result",
+                        "toolName": name,
+                        "text": _stringify_response(response),
+                        "timestamp": timestamp,
+                    })
+                    part_index += 1
+                continue
+
+            if text:
+                steps.append({
+                    "id": f"{event_id}:{part_index}",
+                    "author": author,
+                    "kind": "text",
+                    "text": text,
+                    "timestamp": timestamp,
+                })
+                part_index += 1
+
+        if _has_transfer(event) and part_index == 0:
+            # Some transfer events carry no content parts at all -- still
+            # surface that a handoff happened rather than dropping the
+            # event silently.
+            steps.append({
+                "id": f"{event_id}:transfer",
+                "author": author,
+                "kind": "transfer",
+                "timestamp": timestamp,
+            })
+
+    return steps
+
+
+def _stringify_response(response: Any) -> str:
+    """Tool responses are already-parsed dicts (e.g. {"result": "..."} for
+    specialist calls, {"status": "success", ...} for display_image) --
+    render the human-readable `result` field when present, otherwise fall
+    back to the raw dict so nothing is silently lost.
+    """
+    if isinstance(response, dict) and "result" in response:
+        return str(response["result"])
+    return str(response)
+
+
+def dedupe_by_id(steps: list[dict]) -> list[dict]:
+    """Idempotent replay guard for cursor pages that may overlap slightly at
+    the boundary -- keeps first occurrence, preserves order.
+    """
+    seen: set[str] = set()
+    deduped = []
+    for step in steps:
+        if step["id"] in seen:
+            continue
+        seen.add(step["id"])
+        deduped.append(step)
+    return deduped
