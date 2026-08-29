@@ -109,3 +109,9 @@ Desktop.ini
 *.swp
 .cache/
 .adk/
+
+# Spike run output (raw campaign event dumps / poll logs) - see
+# scripts/spikes/README.md for how to re-generate these
+scripts/spikes/results/*.json
+scripts/spikes/results/*.jsonl
+!scripts/spikes/results/.gitkeep
