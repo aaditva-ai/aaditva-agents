@@ -348,3 +348,79 @@ The new frontend is live and the Gradio implementation is fully removed from the
 - Delete `gradio-ui/` (`app.py`, `Dockerfile`, `pyproject.toml`, `uv.lock`, `README.md`) and `deploy/deploy_gradio.py`.
 - Remove the `creative-director-ui` Cloud Run service and drop Gradio from dependency manifests.
 - Update `README.md`, `docs/`, and `deploy/teardown_gcp.sh` to cover the SPA, broker, campaign queue and driver, replacing all Gradio references.
+
+# Decisions made during Step 2 onwards work
+
+This section records judgment calls made while implementing Steps 2–6,
+since the plan above was written before Step 1's spikes ran and before any
+code existed. Gradio is deliberately left in place throughout (`gradio-ui/`,
+`deploy/deploy_gradio.py`, the `creative-director-ui` Cloud Run service) so
+it can be compared side-by-side with the new SPA before Step 7 removes it.
+
+## Step 2: campaign-driver + Cloud Tasks queue
+
+- **Service layout**: `campaign-driver/` is its own top-level directory with
+  its own `pyproject.toml`/`uv.lock`/`Dockerfile`, mirroring
+  `agents/designer/`'s structure rather than folding into an existing
+  agent. It has no ADK `Agent` of its own — it's a thin Starlette app
+  wrapping `vertexai.Client`/`async_stream_query`, so it declares
+  `google-cloud-aiplatform[agent-engines]` directly rather than pulling in
+  `google-adk[a2a]` for a framework it doesn't use.
+- **503-tolerant drain, not a blind retry**: Step 1's spikes hit a
+  transient `503 UNAVAILABLE` from `async_stream_query` in 3 of the runs it
+  used, always well after the campaign was already progressing — and in
+  every case the session kept executing and even reached full completion
+  server-side with zero client attached. `main.py`'s `_drain` encodes this
+  finding directly: on a stream error it re-reads `sessions.events.list`
+  twice (with a backoff between reads) and only re-invokes the stream if
+  the event count is still growing; if it's stable, the campaign is
+  treated as already complete rather than retried. This was verified for
+  real, not just unit-tested: an end-to-end Cloud Tasks → `/drive` →
+  `async_stream_query` smoke test ran a full ~5-minute campaign to
+  `complete` with 15 events persisted (see verification note below).
+- **Re-entry guard lives in Firestore, keyed on session status, not on a
+  Cloud Tasks dedupe key**: `campaign_store.mark_running` uses a
+  transactional read-then-write that refuses to proceed if the campaign
+  document is already `running`. This is what stops a re-delivered task
+  (the queue is `--max-attempts=1`, so this is about a stray duplicate
+  enqueue, not queue-level retries) from starting a second concurrent
+  drive on the same session — Step 1's `spike_resume` already showed the
+  ADK runner itself continues cleanly from session history, so this guard
+  exists purely to prevent *concurrent* drives, not to block legitimate
+  resume (which calls `mark_running` again once the prior run is no longer
+  `running`).
+- **`--max-attempts=1` on the queue, confirmed against the plan's own
+  reasoning**: a timed-out or 5xx `/drive` must never be silently
+  re-dispatched as a duplicate campaign. Retry logic for *transient*
+  mid-stream errors lives inside `_drain` itself instead, because a
+  queue-level retry would otherwise race a second `/drive` invocation
+  against the first drive's still-running drain.
+- **Firebase project registration was explicitly declined, not worked
+  around**: `firebase projects:addfirebase aaditva` was blocked by the
+  permission classifier as a shared/hard-to-reverse GCP project change.
+  Per the standing instruction to respect such blocks rather than route
+  around them, this was left for the user to do manually (one-time, in the
+  Firebase console) rather than retried via a different tool. Only
+  `gcloud services enable firebase.googleapis.com identitytoolkit.googleapis.com`
+  (API enablement, not project registration) was run directly. **Action
+  needed from you**: run `firebase projects:addfirebase aaditva`, then
+  enable at least one sign-in provider (e.g. Google) in Firebase Console →
+  Authentication → Sign-in method, before Step 4's SPA auth gate can be
+  exercised against a real account.
+- **Verification performed live, not just unit tests**: `campaign-driver`
+  was actually deployed to Cloud Run (`--no-allow-unauthenticated`,
+  `--timeout=1800`, `--no-cpu-throttling`, scale-to-zero
+  `--min-instances=0`) and the `campaigns` queue was created for real
+  (`--max-attempts=1`, confirmed via `gcloud tasks queues describe`). Three
+  checks were run against the live deployment: (1) an unauthenticated
+  `POST /drive` returns `403` at Cloud Run's own IAM layer, confirming
+  "never publicly invokable" holds without relying on the app's own OIDC
+  check; (2) a real Cloud Tasks task was enqueued and reached `/drive`
+  with a valid OIDC token, exercising the full push path; (3) that task
+  drove one real (paid) ~5-minute campaign to `complete` with the
+  Firestore campaign document transitioning `dispatched` → `running` →
+  `complete` correctly. Only one paid campaign run was used for this,
+  reusing the existing `campaigns` queue rather than creating throwaway
+  infra. 12 unit tests (`campaign-driver/tests/test_main.py`) cover the
+  auth/validation/re-entry/retry-vs-complete branching without further
+  live calls.
