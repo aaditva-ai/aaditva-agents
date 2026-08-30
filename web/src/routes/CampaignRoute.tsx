@@ -18,9 +18,9 @@ export function CampaignRoute() {
   const resume = useResumeCampaign(sessionId);
 
   return (
-    <div className="campaign-page">
-      <header className="campaign-header">
-        <Link to="/">&larr; All campaigns</Link>
+    <div className="flex flex-col bg-background min-h-screen">
+      <header className="flex items-center gap-3 p-4 border-b border-border bg-card shadow-sm sticky top-0 z-10">
+        <Link to="/" className="text-primary hover:underline text-sm font-medium">← All campaigns</Link>
       </header>
 
       {/* isError + failureCount surfaces a non-blocking "reconnecting"
@@ -29,22 +29,35 @@ export function CampaignRoute() {
           never wipes the transcript (plan Step 6 / Functional Requirement
           8), unlike gradio-ui/app.py's single-error-bubble replacement. */}
       {query.isError && (
-        <div className="status-banner status-banner-warning">
+        <div className="text-center text-sm text-muted-foreground bg-yellow-50 py-3 px-4 rounded-md">
           Reconnecting… (attempt {query.failureCount})
         </div>
       )}
 
-      {query.data ? (
+      {/* Empty state for new campaigns */}
+      {!query.data && !query.isLoading && query.isSuccess && (
+        <section className="flex flex-col items-center justify-center py-12 gap-4 text-muted-foreground bg-muted/30 rounded-lg border border-border">
+          <svg className="w-16 h-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          <p className="text-center text-sm">Campaign started - transcript loading</p>
+        </section>
+      )}
+
+      {query.data && query.data.length > 0 ? (
         <TranscriptView
           transcript={query.data}
           onResume={RESUMABLE_STATUSES.has(query.data.status) ? () => resume.mutate() : undefined}
           isResuming={resume.isPending}
         />
       ) : query.isLoading ? (
-        <p>Loading campaign…</p>
+        <div className="flex flex-col items-center justify-center py-12 gap-3">
+          <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+          <p className="text-sm text-muted-foreground">Loading campaign…</p>
+        </div>
       ) : null}
 
-      {resume.isError && <p className="error-text">{resume.error.message}</p>}
+      {resume.isError && (
+        <p className="text-center text-sm text-destructive bg-destructive/10 px-4 py-2 rounded-md">{resume.error.message}</p>
+      )}
     </div>
   );
 }
