@@ -30,52 +30,58 @@ After examining the `web/` folder (Vite + React + TypeScript SPA), I've identifi
 
 ### 1. Add a Design System / Theming Layer
 
-**Option A: Tailwind CSS (Recommended)**
-- Install Tailwind + its React plugin
-- Add utility-first classes to components and App.css
-- Pros: Fast development, easy dark mode, industry standard
-- Cons: Large bundle if not optimized
+**Recommended Stack: Tailwind CSS + shadcn/ui patterns (Free-only)**
+- Use **bun** package manager exclusively for `web/` folder only (replace `npm install` with `bun install`, update scripts from `npm run` to `bun run`)
+- Use Tailwind CSS with React plugin for utility-first styling (free, no heavy design system like MUI)
+- Follow **shadcn/ui patterns**: simple components, Material Design visual language (clean cards, soft shadows, rounded corners)
+- Use a **token system** (CSS variables in `index.css`) instead of many SCSS/SASS files
+- Pros: Fast development, easy dark mode, industry standard, free libraries only, simple aesthetic
+- Cons: Requires initial setup; bundle is optimized by Vite with tree-shaking
 
-**Option B: Style Component Library (e.g., MUI or Chakra UI)**
-- Pre-styled components with consistent design tokens
-- Pros: Quick professional polish, accessible by default
-- Cons: Heavier than Tailwind, opinionated design
-
-### 2. Enhance Global Styles (`index.css`)
-- Add a proper font stack (Inter via Google Fonts would be great)
-- Implement dark/light theme support via CSS variables
+### 2. Enhance Global Styles (`index.css`) - Token System
+- Add a proper font stack (Inter via Google Fonts or system fonts as fallback)
+- Implement dark/light theme support via CSS custom properties (e.g., `--background`, `--foreground`, `--primary`, `--muted`)
+- Define design tokens for: spacing (`--spacing-*`), border radius (`--radius-*`), shadows (`--shadow-*`)
 - Add smooth transitions for hover/focus states
-- Add subtle shadows and rounded corners as base design tokens
+- Use token values consistently across components to avoid repetitive CSS
 
-### 3. Component-Specific Styling Upgrades (`App.css`)
+### 3. Component-Specific Styling with Tailwind (Utility Classes)
 
 **Home Page:**
-- Style the form with better visual hierarchy (larger header, cleaner button)
-- Add subtle gradients or background pattern to make it less plain
-- Style recent campaigns list with cards instead of a `<ul>`
+- Style the form with better visual hierarchy: larger header (`text-xl font-semibold`), cleaner submit button (`bg-primary text-primary-foreground hover:bg-primary/90`)
+- Add subtle gradients or background pattern via CSS tokens to reduce plain look
+- Style recent campaigns list with cards instead of `<ul>` (use Tailwind grid and card utilities)
 
 **Campaign View:**
-- Add progress bars for multi-step transcripts
-- Style each step card with clearer typography and spacing
-- Add visual feedback for tool calls/results (icons, colors)
-- Improve status banner design with better iconography
+- Add progress bars for multi-step transcripts (`progress-bar` component style from shadcn/ui patterns)
+- Style each step card with clearer typography and spacing (Tailwind `rounded-lg border p-4`)
+- Add visual feedback for tool calls/results using Tailwind color utilities and icons
+- Improve status banner design with Tailwind utility classes and semantic colors
 
 ### 4. Navigation & Layout Improvements
-- Add a top navigation bar with app logo/title
-- Add breadcrumbs or clear path indicators
-- Add user profile dropdown (avatar + name + settings link)
-- Consider a sidebar for history/settings if needed
+- Add a top navigation bar with app logo/title (`nav` component inspired by shadcn/ui patterns)
+- Add breadcrumbs or clear path indicators (`breadcrumb` component style)
+- Add user profile dropdown (avatar + name + settings link) using Tailwind flex utilities
+- Consider a sidebar for history/settings if needed (responsive design with mobile menu pattern)
 
 ### 5. Visual Polish Details
-- Add subtle entrance animations for components
-- Style loading states better (skeleton loaders instead of text "Loading…")
-- Add empty state illustrations when no campaigns exist
-- Improve error messages with icons and softer colors
+- Add subtle entrance animations via CSS transitions and keyframes (use token-based animation durations)
+- Style loading states better: skeleton loaders instead of text "Loading…" (Tailwind skeleton patterns)
+- Add empty state illustrations when no campaigns exist (simple SVG or icon)
+- Improve error messages with icons and softer colors (Tailwind color tokens)
 
 ### 6. Accessibility Improvements
-- Add proper focus styles for keyboard navigation
-- Ensure sufficient color contrast ratios
+- Add proper focus styles for keyboard navigation (`focus-visible:ring` utilities)
+- Ensure sufficient color contrast ratios (use Tailwind's accessible palette)
 - Add aria-labels where semantic HTML isn't enough
+
+---
+
+### Deploy Scripts Adjustment
+- Update build/deploy scripts to reference `dist/` output from Vite
+- For deployment, use `bun run build` to produce optimized production bundle
+- Ensure hosting or container deployments serve static files from `dist/`
+- Optionally: add CI steps to run `bun install`, `bun run lint`, and `bun run test` before build
 
 ---
 
@@ -93,10 +99,10 @@ This approach minimizes risk while visibly improving the UI at each step.
 ## Next Steps
 
 Would you like me to implement any specific suggestions from this plan? Options include:
-- Adding Inter font with dark/light theme support
-- Upgrading home form and recent campaigns styling
-- Adding top navigation bar and user profile
-- Adding skeleton loaders for loading states
-- Implementing accessibility improvements (focus styles, aria-labels)
+- Adding Inter font with dark/light theme support (token-based CSS variables)
+- Upgrading home form and recent campaigns styling (Tailwind utility classes)
+- Adding top navigation bar and user profile (shadcn/ui-inspired nav components)
+- Adding skeleton loaders for loading states (Tailwind `animate-pulse` or custom skeletons)
+- Implementing accessibility improvements (`focus-visible:ring`, aria-labels)
 
 The implementation can be done incrementally to ensure each change is validated before proceeding.
