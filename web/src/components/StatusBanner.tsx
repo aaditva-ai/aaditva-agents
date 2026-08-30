@@ -17,17 +17,21 @@ export function StatusBanner({
 }) {
   switch (status) {
     case "starting":
-      return <div className="status-banner status-banner-info">Starting your campaign…</div>;
+      return <div className="text-sm bg-muted/30 px-4 py-2.5 rounded-md border border-border">Starting your campaign…</div>;
     case "running":
-      return <div className="status-banner status-banner-info">Campaign in progress…</div>;
+      return <div className="text-sm bg-muted/30 px-4 py-2.5 rounded-md border border-border">Campaign in progress…</div>;
     case "complete":
-      return <div className="status-banner status-banner-success">Campaign complete.</div>;
+      return <div className="text-sm bg-emerald-50/50 px-4 py-2.5 rounded-md border border-border text-emerald-800 font-medium">✓ Campaign complete.</div>;
     case "failed":
       return (
-        <div className="status-banner status-banner-error">
-          <span>This campaign failed.</span>
+        <div className="bg-destructive/10 border border-destructive/20 px-4 py-3 rounded-md">
+          <span className="text-sm">This campaign failed.</span>
           {onResume && (
-            <button onClick={onResume} disabled={isResuming}>
+            <button
+              onClick={onResume}
+              disabled={isResuming}
+              className="ml-3 text-sm font-medium text-destructive hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded px-2 py-1"
+            >
               {isResuming ? "Resuming…" : "Resume"}
             </button>
           )}
@@ -35,10 +39,14 @@ export function StatusBanner({
       );
     case "stalled":
       return (
-        <div className="status-banner status-banner-warning">
-          <span>No progress for a while — this campaign may have stalled.</span>
+        <div className="bg-yellow-50/50 border border-yellow-200 px-4 py-2.5 rounded-md">
+          <span className="text-sm text-yellow-800">No progress for a while — this campaign may have stalled.</span>
           {onResume && (
-            <button onClick={onResume} disabled={isResuming}>
+            <button
+              onClick={onResume}
+              disabled={isResuming}
+              className="ml-3 text-sm font-medium text-yellow-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded px-2 py-1"
+            >
               {isResuming ? "Resuming…" : "Resume"}
             </button>
           )}
