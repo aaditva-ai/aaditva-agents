@@ -7,10 +7,12 @@ architecture and rationale).
 
 ## Setup
 
+**Prerequisites:** [Bun](https://bun.sh) package manager installed globally.
+
 ```bash
-npm install
+bun install
 cp .env.example .env   # then fill in VITE_FIREBASE_* and VITE_BROKER_URL
-npm run dev
+bun run dev
 ```
 
 Firebase config values are public client identifiers, not secrets, but are
@@ -19,10 +21,24 @@ Firebase Console.
 
 ## Scripts
 
-- `npm run dev` — local dev server
-- `npm run build` — typecheck (`tsc -b`) + production build to `dist/`
-- `npm run test` — unit tests (Vitest)
-- `npm run lint` — Oxlint
+All commands use `bun`:
+
+- `bun run dev` — local development server (Vite)
+- `bun run build` — typecheck (`tsc -b`) + production build to `dist/`
+- `bun run test` — unit tests (Vitest)
+- `bun run lint` — Oxlint
+
+> **Note:** This project uses Bun as the package manager for `web/`. All dependency installation, dev, and build commands should use `bun`.
+
+## Deploying
+
+For production deployment:
+
+```bash
+bun install
+bun run build
+# Copy dist/ contents to your hosting provider (Vite static build)
+```
 
 ## Structure
 
