@@ -1,5 +1,6 @@
 import type { StepGroup } from "../api/selectTranscript";
 import type { Step } from "../api/types";
+import { MarkdownContent } from "./MarkdownContent";
 
 /**
  * Purely presentational (plan Step 5): consumes the already-grouped view
@@ -22,7 +23,7 @@ export function StepCard({ group }: { group: StepGroup }) {
 function StepView({ step }: { step: Step }) {
   switch (step.kind) {
     case "text":
-      return <p className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">{step.text}</p>;
+      return <MarkdownContent content={step.text ?? ""} />;
     case "tool_call":
       return (
         <span

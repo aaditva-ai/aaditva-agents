@@ -27,18 +27,21 @@ All commands use `bun`:
 - `bun run build` — typecheck (`tsc -b`) + production build to `dist/`
 - `bun run test` — unit tests (Vitest)
 - `bun run lint` — Oxlint
+- `bun run deploy` — deploy static bundle to Firebase Hosting (`firebase deploy --only hosting`)
 
 > **Note:** This project uses Bun as the package manager for `web/`. All dependency installation, dev, and build commands should use `bun`.
 
 ## Deploying
 
-For production deployment:
+For production deployment to Firebase Hosting:
 
 ```bash
 bun install
 bun run build
-# Copy dist/ contents to your hosting provider (Vite static build)
+bun run deploy
 ```
+
+This builds the static bundle to `dist/` and deploys it to Firebase Hosting as configured in `firebase.json` and `.firebaserc`.
 
 ## Structure
 

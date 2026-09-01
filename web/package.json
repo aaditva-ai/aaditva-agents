@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "deploy": "firebase deploy --only hosting"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -16,7 +17,10 @@
     "firebase": "^12.18.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router-dom": "^7.18.3"
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.18.3",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.1",
