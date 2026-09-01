@@ -191,6 +191,11 @@ async def deploy() -> None:
         "CAMPAIGN_TASKS_LOCATION": tasks_location,
         "CAMPAIGN_TASKS_QUEUE": tasks_queue,
         "BROKER_ALLOWED_ORIGINS": allowed_origins,
+        "STRATEGIST_AGENT_URL": os.getenv("STRATEGIST_AGENT_URL", ""),
+        "COPYWRITER_AGENT_URL": os.getenv("COPYWRITER_AGENT_URL", ""),
+        "DESIGNER_AGENT_URL": os.getenv("DESIGNER_AGENT_URL", ""),
+        "CRITIC_AGENT_URL": os.getenv("CRITIC_AGENT_URL", ""),
+        "PM_AGENT_URL": os.getenv("PM_AGENT_URL", ""),
     }
     env_vars_file = _write_env_vars_file(env_vars)
 
