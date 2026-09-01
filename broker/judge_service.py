@@ -123,29 +123,42 @@ async def save_evaluation(session_id: str, evaluation: dict[str, Any]) -> None:
 def _format_transcript_for_judge(steps: list[dict], prompt: str) -> str:
     lines = [f"CAMPAIGN BRIEF PROMPT: {prompt}\n", "EXECUTION TRANSCRIPT:"]
     for s in steps:
-        step_type = s.get("type", "unknown")
+        step_kind = s.get("kind") or s.get("type", "unknown")
         author = s.get("author") or s.get("title") or "system"
-        if step_type == "message":
+        if step_kind in ("text", "message"):
             lines.append(f"[{author}]: {s.get('text', '')}")
-        elif step_type == "tool_call":
-            lines.append(f"[TOOL CALL - {s.get('toolName', 'tool')}]: {s.get('args', '')}")
-        elif step_type == "tool_response":
-            lines.append(f"[TOOL RESPONSE - {s.get('toolName', 'tool')}]: {s.get('result', '')}")
-        elif step_type == "image":
-            lines.append(f"[IMAGE GENERATED]: {s.get('title', 'Image')} - URL: {s.get('url', '')}")
-        elif step_type == "status":
-            lines.append(f"[STATUS]: {s.get('message', '')}")
+        elif step_kind == "tool_call":
+            tool_name = s.get("toolName") or s.get("tool") or "tool"
+            args = s.get("args") or s.get("text", "")
+            lines.append(f"[TOOL CALL - {tool_name}]: {args}")
+        elif step_kind in ("tool_result", "tool_response"):
+            tool_name = s.get("toolName") or s.get("tool") or "tool"
+            result = s.get("text") or s.get("result", "")
+            lines.append(f"[TOOL RESPONSE - {tool_name}]: {result}")
+        elif step_kind == "image":
+            img_url = s.get("imageUrl") or s.get("url", "")
+            img_title = s.get("text") or s.get("title", "Image")
+            lines.append(f"[IMAGE GENERATED]: {img_title} - URL: {img_url}")
+        elif step_kind == "transfer":
+            lines.append(f"[AGENT TRANSFER]: {author}")
+        elif step_kind == "status":
+            lines.append(f"[STATUS]: {s.get('message') or s.get('text', '')}")
     return "\n".join(lines)
 
 
 def _heuristic_evaluate(steps: list[dict], prompt: str) -> dict[str, Any]:
     """Deterministic rubric evaluation when LLM backend is unavailable."""
-    text_corpus = " ".join([str(s.get("text", "")) + " " + str(s.get("result", "")) for s in steps]).lower()
-    has_strategist = "strategist" in text_corpus or "demographic" in text_corpus or "persona" in text_corpus or any(s.get("type") == "message" for s in steps)
-    has_copywriter = "caption" in text_corpus or "hook" in text_corpus or "hashtag" in text_corpus or "cta" in text_corpus
-    has_designer = any(s.get("type") == "image" for s in steps) or "image" in text_corpus or "visual" in text_corpus
-    has_critic = "review" in text_corpus or "approved" in text_corpus or "verdict" in text_corpus
-    has_pm = "notion" in text_corpus or "timeline" in text_corpus or "schedule" in text_corpus or "post" in text_corpus
+    text_corpus = " ".join([
+        str(s.get("text", "")) + " " +
+        str(s.get("result", "")) + " " +
+        str(s.get("toolName", ""))
+        for s in steps
+    ]).lower()
+    has_strategist = "strategist" in text_corpus or "demographic" in text_corpus or "persona" in text_corpus or any((s.get("kind") or s.get("type")) in ("text", "message") for s in steps)
+    has_copywriter = "caption" in text_corpus or "hook" in text_corpus or "hashtag" in text_corpus or "cta" in text_corpus or "copy" in text_corpus
+    has_designer = any((s.get("kind") or s.get("type")) == "image" for s in steps) or "image" in text_corpus or "visual" in text_corpus
+    has_critic = "review" in text_corpus or "approved" in text_corpus or "verdict" in text_corpus or "critic" in text_corpus
+    has_pm = "notion" in text_corpus or "timeline" in text_corpus or "schedule" in text_corpus or "post" in text_corpus or "project_manager" in text_corpus
 
     criteria_results = []
     
