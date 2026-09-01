@@ -35,5 +35,18 @@ export function RecentCampaigns() {
             className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border bg-card hover:bg-accent transition-colors group"
           >
             <span
-              className={`w-2 h-2 rounded-full flex-shrink-0 ${\n  c.status === 'complete' ? 'bg-emerald-500' :\n    c.status === 'running' || c.status === 'starting' ? 'bg-blue-500' :\n    c.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500'\n}`}\n            />\n            <span className="flex-1 text-sm font-medium tracking-tight">{c.title || '(untitled campaign)'}</span>\n          </Link>\n        ))}\n      </div>\n    </section>\n  );
+              className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                c.status === 'complete' ? 'bg-emerald-500' :
+                c.status === 'running' ? 'bg-blue-500' :
+                c.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500'
+              }`}
+            />
+            <span className="flex-1 text-sm font-medium tracking-tight">
+              {c.title || '(untitled campaign)'}
+            </span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
 }

@@ -66,12 +66,17 @@ async function resumeCampaign(sessionId: string): Promise<{ sessionId: string }>
  * the next poll picks up the fresh "running" status instead of waiting out
  * the existing refetchInterval.
  */
-export function useResumeCampaign(sessionId: string) {
+export function useResumeCampaign(sessionId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation<{ sessionId: string }, ApiError, void>({
-    mutationFn: () => resumeCampaign(sessionId),
+    mutationFn: () => {
+      if (!sessionId) throw new Error("No session ID");
+      return resumeCampaign(sessionId);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["campaign", sessionId, "events"] });
+      if (sessionId) {
+        queryClient.invalidateQueries({ queryKey: ["campaign", sessionId, "events"] });
+      }
     },
   });
 }
@@ -101,10 +106,14 @@ const POLL_INTERVAL_MS = 2000;
  * no-op (see infiniteQueryBehavior.ts's `param == null && data.pages.length`
  * early-return), silently freezing the poll.
  */
-export function useCampaignEvents(sessionId: string) {
+export function useCampaignEvents(sessionId: string | undefined) {
   const query = useInfiniteQuery({
     queryKey: ["campaign", sessionId, "events"],
-    queryFn: ({ pageParam }) => fetchEvents(sessionId, pageParam),
+    queryFn: ({ pageParam }) => {
+      if (!sessionId) throw new Error("No session ID");
+      return fetchEvents(sessionId, pageParam);
+    },
+    enabled: Boolean(sessionId),
     initialPageParam: undefined as string | null | undefined,
     getNextPageParam: (lastPage) => lastPage.cursor,
     select: selectTranscript,
@@ -117,6 +126,7 @@ export function useCampaignEvents(sessionId: string) {
   const { fetchNextPage, isFetchingNextPage } = query;
 
   useEffect(() => {
+    if (!sessionId) return;
     if (isTerminal(status ?? "starting")) return;
     // "stalled" keeps polling deliberately, since a stall can resolve on
     // its own (e.g. a slow specialist call finally returns) and the only
@@ -129,7 +139,7 @@ export function useCampaignEvents(sessionId: string) {
       if (!isFetchingNextPage) void fetchNextPage();
     }, POLL_INTERVAL_MS);
     return () => window.clearInterval(id);
-  }, [status, fetchNextPage, isFetchingNextPage]);
+  }, [sessionId, status, fetchNextPage, isFetchingNextPage]);
 
   return query;
 }

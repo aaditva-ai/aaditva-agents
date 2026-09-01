@@ -1,168 +1,136 @@
-# Aaditva Campaign Builder — UI Improvement Plan
+# Aaditva Campaign Builder — UI Improvement Plan & Status Audit
 
-## Current State Analysis
+## Executive Summary
 
-After examining the `web/` folder (Vite + React + TypeScript SPA), I've identified that the current UI is a functional but very plain debugging-looking interface. Here are the key observations:
+This document serves as the single source of truth for the UI/UX architecture and implementation progress of the **Aaditva Campaign Builder** frontend (`web/` directory). 
 
-### Code Structure
-- `/src/App.tsx` — Simple router with two routes (`/` and `/c/:sessionId`)
-- `/src/index.css` — Minimal global reset (16 lines, basic box-sizing and height)
-- `/src/App.css` — Component-specific styles (~154 lines), currently very minimal
-- Components are functional/presentational with no styling framework
-
-### UI Characteristics
-- Uses system font (`system-ui`)
-- Plain text buttons like "Sign out", "Start campaign"
-- Basic status banners with colored backgrounds but minimal visual polish
-- Tool chips are simple inline blocks
-- No navigation menu, breadcrumbs, or user profile UI
-- Recent campaigns shown as a simple `<ul>` list
-- Forms look unstyled (plain textarea and submit button)
-
-### Key Files for UI Improvements
-1. `/src/index.css` — Global styles and theming
-2. `/src/App.css` — Component styling
-3. `/vite.config.ts` — Can add CSS-in-JS, bundling custom fonts/assets
+The target stack is a modern, lightweight, utility-first React Single Page Application (SPA) powered by **Bun**, **Vite**, **Tailwind CSS v4**, and design tokens adhering to **shadcn/ui** patterns.
 
 ---
 
-## Concrete Suggestions to Make the UI Better
+## 1. Tech Stack & Architecture Overview
 
-### 1. Add a Design System / Theming Layer
-
-**Recommended Stack: Tailwind CSS + shadcn/ui patterns (Free-only)**
-- Use **bun** package manager exclusively for `web/` folder only (replace `npm install` with `bun install`, update scripts from `npm run` to `bun run`)
-- Use Tailwind CSS with React plugin for utility-first styling (free, no heavy design system like MUI)
-- Follow **shadcn/ui patterns**: simple components, Material Design visual language (clean cards, soft shadows, rounded corners)
-- Use a **token system** (CSS variables in `index.css`) instead of many SCSS/SASS files
-- Pros: Fast development, easy dark mode, industry standard, free libraries only, simple aesthetic
-- Cons: Requires initial setup; bundle is optimized by Vite with tree-shaking
-
-### 2. Enhance Global Styles (`index.css`) - Token System
-- Add a proper font stack (Inter via Google Fonts or system fonts as fallback)
-- Implement dark/light theme support via CSS custom properties (e.g., `--background`, `--foreground`, `--primary`, `--muted`)
-- Define design tokens for: spacing (`--spacing-*`), border radius (`--radius-*`), shadows (`--shadow-*`)
-- Add smooth transitions for hover/focus states
-- Use token values consistently across components to avoid repetitive CSS
-
-### 3. Component-Specific Styling with Tailwind (Utility Classes)
-
-**Home Page:**
-- Style the form with better visual hierarchy: larger header (`text-xl font-semibold`), cleaner submit button (`bg-primary text-primary-foreground hover:bg-primary/90`)
-- Add subtle gradients or background pattern via CSS tokens to reduce plain look
-- Style recent campaigns list with cards instead of `<ul>` (use Tailwind grid and card utilities)
-
-**Campaign View:**
-- Add progress bars for multi-step transcripts (`progress-bar` component style from shadcn/ui patterns)
-- Style each step card with clearer typography and spacing (Tailwind `rounded-lg border p-4`)
-- Add visual feedback for tool calls/results using Tailwind color utilities and icons
-- Improve status banner design with Tailwind utility classes and semantic colors
-
-### 4. Navigation & Layout Improvements
-- Add a top navigation bar with app logo/title (`nav` component inspired by shadcn/ui patterns)
-- Add breadcrumbs or clear path indicators (`breadcrumb` component style)
-- Add user profile dropdown (avatar + name + settings link) using Tailwind flex utilities
-- Consider a sidebar for history/settings if needed (responsive design with mobile menu pattern)
-
-### 5. Visual Polish Details
-- Add subtle entrance animations via CSS transitions and keyframes (use token-based animation durations)
-- Style loading states better: skeleton loaders instead of text "Loading…" (Tailwind skeleton patterns)
-- Add empty state illustrations when no campaigns exist (simple SVG or icon)
-- Improve error messages with icons and softer colors (Tailwind color tokens)
-
-### 6. Accessibility Improvements
-- Add proper focus styles for keyboard navigation (`focus-visible:ring` utilities)
-- Ensure sufficient color contrast ratios (use Tailwind's accessible palette)
-- Add aria-labels where semantic HTML isn't enough
+| Layer | Target Specification | Current Status | Notes |
+| :--- | :--- | :---: | :--- |
+| **Runtime / Package Manager** | Bun exclusively (`bun install`, `bun run`) | ✅ Done | `package.json` scripts and `bun.lock` configured. |
+| **Build Tooling** | Vite + React + TypeScript | ✅ Done | `vite.config.ts` configured with `@tailwindcss/vite`. |
+| **Styling Engine** | Tailwind CSS (v4) utility classes | ✅ Done | Utility-first styling across primary routes and components. |
+| **Theming & Design Tokens** | CSS Custom Properties (`:root` and `.dark`) | ✅ Done | Semantic color tokens defined in `src/index.css`. |
+| **Typography** | Inter Font Stack | 🟡 Partial | Defined in `index.css`; Google Fonts `<link>` pending in `index.html`. |
+| **Layout & Shell** | Global persistent Navbar & responsive layout | ⏳ Pending | Routes currently manage separate layouts independently. |
+| **Legacy Stylesheet** | Deprecate & remove `App.css` | ⏳ Pending | `App.css` still present with 154 lines of legacy rules. |
 
 ---
 
-### Deploy Scripts Adjustment
-- Update build/deploy scripts to reference `dist/` output from Vite
-- For deployment, use `bun run build` to produce optimized production bundle
-- Ensure hosting or container deployments serve static files from `dist/`
-- Optionally: add CI steps to run `bun install`, `bun run lint`, and `bun run test` before build
+## 2. Component & Feature Status Matrix
+
+| Component / Asset | File Path | Status | Summary of Current State & Audit Findings |
+| :--- | :--- | :---: | :--- |
+| **Theming Tokens** | `src/index.css` | ✅ Done | Full semantic token palette (`--primary`, `--background`, `--card`, `--muted`, `--destructive`, `--ring`, etc.) with dark mode support. |
+| **Tailwind Config** | `tailwind.config.mjs`, `tailwind.json` | ✅ Done | Token integration, border-radius variables, and Inter font family configured. |
+| **Home Route** | `src/routes/HomeRoute.tsx` | ✅ Done | Clean card container, styled prompt textarea, animated spinner on submit button, and error alerts. *Minor cleanup: redundant `<h2>` wrapper.* |
+| **Recent Campaigns** | `src/components/RecentCampaigns.tsx` | ✅ Done | Responsive 2-column card grid, colored status dots (`complete`, `running`, `failed`), animated skeleton loaders, and empty state SVG. |
+| **Campaign Route** | `src/routes/CampaignRoute.tsx` | ✅ Done | Sticky top header with back navigation, animated loading ring, reconnecting status banner, and empty state graphic. |
+| **Status Banner** | `src/components/StatusBanner.tsx` | ✅ Done | Semantic color treatments (`emerald-500`, `destructive`, `yellow-500`), icon indicators, and focus-visible rings on resume action. |
+| **Step Card** | `src/components/StepCard.tsx` | ✅ Done | Bordered card styling, blue tool call badges, collapsible emerald tool result `<details>` accordion, purple transfer badges, and responsive image grid. |
+| **Transcript View** | `src/components/TranscriptView.tsx` | 🟡 Partial | Uses legacy `className="transcript"` container from `App.css` rather than native Tailwind flex utilities (`flex flex-col gap-4`). |
+| **Google Fonts Link** | `index.html` | 🟡 Partial | Missing `<link rel="stylesheet">` preconnect and stylesheet link for the Inter font family. |
+| **Auth Gate** | `src/auth/SignInGate.tsx` | ⏳ Pending | Uses legacy `className="centered-page"` and unstyled raw buttons from `App.css`. Needs modern card-based Tailwind makeover. |
+| **Global Layout Shell** | `src/App.tsx` | ⏳ Pending | No shared persistent navigation/header component; `HomeRoute` (`max-w-md`) and `CampaignRoute` have divergent max-widths. |
+| **Accessibility (ARIA)** | Multiple Components | ⏳ Pending | Interactive badges and images lack explicit `aria-label` and `aria-describedby` attributes for screen reader compatibility. |
+| **Legacy `App.css`** | `src/App.css` | ⏳ Pending | Contains 154 lines of legacy CSS rules pending purge once `SignInGate` and `TranscriptView` are migrated. |
+| **Deploy Configuration** | `firebase.json`, `package.json` | ✅ Done | Configured to serve `dist/` directory built via `bun run build`. |
 
 ---
 
-## Recommended Implementation Path
+## 3. Completed Milestones (✅ Done)
 
-1. **Start with minimal CSS improvements** (fonts, theme support, transitions)
-2. **Upgrade component-by-component styling** (home form → campaign view)
-3. **Add navigation/layout elements** once base styling is solid
-4. **Consider adding a UI library** if the team wants faster development long-term
+### 3.1 Build & Tooling Setup with Bun
+- Configured Bun as the package manager for `web/`.
+- Configured Vite with `@tailwindcss/vite` plugin and modern TypeScript compilation.
+- Production build verified with `bun run build` outputting optimized bundles to `dist/`.
 
-This approach minimizes risk while visibly improving the UI at each step.
+### 3.2 Design Token & Theming Layer (`src/index.css`)
+- Implemented CSS Custom Property token architecture adhering to shadcn/ui patterns.
+- Provided complete light and dark theme variable mappings (`--background`, `--foreground`, `--card`, `--primary`, `--muted`, `--accent`, `--destructive`, `--border`, `--input`, `--ring`).
+- Base reset and utility layers configured cleanly.
 
----
-
-## Implementation Status (Completed Steps)
-
-### ✅ Step 1: Tailwind CSS Setup with bun
-- Installed `@tailwindcss/vite` plugin in vite.config.ts
-- Created tailwind.json config file (shadcn/ui schema, css=false for utility-first)
-- Created tailwind.config.mjs with theme tokens (colors, radius, fonts, Inter family)
-- Updated src/index.css with CSS custom property theming tokens (--background, --foreground, etc.)
-- Both light and dark mode support via .dark class
-
-### ✅ Step 2: HomeRoute & RecentCampaigns Styling
-- HomeRoute form converted to Tailwind utility classes with semantic colors
-- Header styled with border, shadow-sm, proper spacing (Material Design look)
-- Form inputs use bg-background, rounded-lg, focus ring utilities
-- Submit button uses primary color with hover state and loading spinner SVG
-- Error messages use destructive/10 background container
-
-### ✅ Step 3-4: CampaignRoute Styling & Loading States
-- CampaignRoute converted to flex-col with bg-background, min-h-screen
-- Header styled with border-b, sticky top positioning (z-10)
-- Added empty state SVG icon for new campaigns
-- Loading spinner replaced text-only loader with animated spin ring
-- Reconnecting banner uses muted foreground with yellow background
-- Error messages use destructive/10 background container
-
-### ✅ Step 5: StatusBanner Styling & Accessibility  
-- Starting/Running banners: muted background with border
-- Complete: emerald-green background with checkmark, medium font weight
-- Failed: destructive background with resume button (semantic colors)
-- Stalled: yellow warning background with descriptive text
-- All resume buttons added focus-visible ring and proper hover states
-
-### ✅ Step 6-7: StepCard Styling with Semantic Colors & Icons
-- Converted step-card to Tailwind border, bg-card, rounded-lg shadow-sm
-- Tool call chips: blue background with arrow icon, hover state
-- Tool result: emerald green details component with accordion summary
-- Image tiles: rounded-lg borders, shadow, hover shadow transition
-- Transfer chip: purple with handoff icon and SVG graphic
-- All interactive elements have focus-visible ring for keyboard navigation
+### 3.3 Core Routes & Live Feed
+- **`HomeRoute.tsx`**: Styled prompt submission form with responsive margins, focus rings, subtle borders, animated loading indicator, and semantic error banners.
+- **`CampaignRoute.tsx`**: Structured with sticky header, back navigation link, status indicators, and live transcript feed.
+- **`RecentCampaigns.tsx`**: Replaced simple unstyled list with responsive card grid, hover transitions, colored status dots, and skeleton loading states.
+- **`StatusBanner.tsx`**: Semantic visual feedback for campaign lifecycle states (`starting`, `running`, `complete`, `failed`, `stalled`) with accessible resume button.
+- **`StepCard.tsx`**: Enhanced step execution cards with distinct badges for tool calls (blue), tool results with accordion disclosure (emerald), agent handoffs (purple), and hoverable output image tiles.
 
 ---
 
-## ⏳ Areas for Manual Review (Address at End)
+## 4. Partially Completed Items (🟡 Partial)
 
-1. **RecentCampaigns.tsx formatting cleanup** - Needs minor cleanup from previous edits
-2. **StepCard author label** - Could use better visual hierarchy (smaller, more muted text)
-3. **ARIA accessibility labels** - Tool chips need aria-label attributes for screen readers
-4. **Image figcaption** - Accessibility could be improved with role/aria-describedby
-5. **Focus-visible ring refinement** - Ensure all interactive elements have proper focus styles
+### 4.1 `TranscriptView.tsx` Container Styling
+- **Current Issue**: The component still relies on the legacy `.transcript` class defined in `App.css`.
+- **Target Fix**: Replace with Tailwind utility classes:
+  ```tsx
+  <div className="flex flex-col gap-4 max-w-4xl mx-auto w-full pb-12">
+    {steps.map(...)}
+  </div>
+  ```
+
+### 4.2 Font Loading in `index.html`
+- **Current Issue**: `src/index.css` configures `font-family: 'Inter', sans-serif`, but `index.html` does not load the Inter font from Google Fonts.
+- **Target Fix**: Add preconnect and font stylesheet link tags to `<head>` in `index.html`:
+  ```html
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  ```
 
 ---
 
-## Deploy Scripts Adjustment (Pending)
+## 5. Pending Backlog & Implementation Roadmap (⏳ Pending)
 
-Update build/deploy scripts to reference `dist/` output from Vite:
-- For deployment, use `bun run build` to produce optimized production bundle
-- Ensure hosting or container deployments serve static files from `dist/`
-- Optionally: add CI steps to run `bun install`, `bun run lint`, and `bun run test` before build
+### Step A: Auth Gate Redesign (`src/auth/SignInGate.tsx`)
+- **Current State**: Uses legacy unstyled classes (`centered-page`, `login-box`, plain `<button>`).
+- **Implementation Plan**:
+  - Convert to a centered card UI using Tailwind utilities (`min-h-screen flex items-center justify-center bg-muted/40 p-4`).
+  - Style the sign-in card with `bg-card border rounded-xl shadow-lg p-6 max-w-sm w-full`.
+  - Use primary button styling for Google/OAuth sign-in with clear hover/focus states and an optional Google SVG icon.
+
+### Step B: Global Layout Component (`src/components/Layout.tsx` & `App.tsx`)
+- **Current State**: Each route manages its own layout, leading to inconsistent container widths (`HomeRoute` is `max-w-md` while `CampaignRoute` is unconstrained) and no persistent branding.
+- **Implementation Plan**:
+  - Create `src/components/Layout.tsx` containing:
+    - Persistent top navigation header (`sticky top-0 z-50 border-b bg-background/95 backdrop-blur`).
+    - App title/branding ("Aaditva Campaign Builder") with link to `/`.
+    - User status pill (user email/avatar and a styled "Sign out" button).
+    - Responsive content container (`max-w-5xl mx-auto px-4 py-6`).
+  - Wrap routes inside `<Layout>` in `App.tsx`.
+
+### Step C: Accessibility & Heading Refinement
+- **Screen Reader Support (ARIA)**:
+  - Add `aria-label` attributes to tool call chips, transfer chips, and interactive disclosure summaries in `StepCard.tsx`.
+  - Add descriptive `alt` and `aria-describedby` attributes to generated image figures.
+- **Heading Deduplication**:
+  - In `HomeRoute.tsx`, remove redundant `<h2>Recent campaigns</h2>` wrapper preceding the `<RecentCampaigns />` component (which already renders its own header).
+- **Focus Rings**:
+  - Standardize `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2` across all interactive buttons, inputs, and links.
+
+### Step D: Legacy CSS Purge & Deprecation (`src/App.css`)
+- **Current State**: `src/App.css` contains 154 lines of legacy CSS (`.transcript`, `.step-card`, `.tool-call`, `.chip`, `.centered-page`, etc.).
+- **Implementation Plan**:
+  - Once Steps A and 4.1 are completed, remove all unused CSS rules from `src/App.css` (or delete `App.css` and remove its import from `App.tsx`).
 
 ---
 
-## Next Steps
+## 6. Recommended Execution Order for Future Sprints
 
-The plan is fully implemented across all 7 major steps. The areas for manual review above are documented in the UI_IMPROVEMENTS_PLAN.md and can be addressed in a follow-up commit batch if needed.
+```mermaid
+graph LR
+  A[Step A: SignInGate UI] --> B[Step B: Global Layout Shell]
+  B --> C[Step 4.1 & 4.2: TranscriptView & Fonts]
+  C --> D[Step C: Accessibility & Heading Polish]
+  D --> E[Step D: Purge Legacy App.css]
+```
 
-Key achievements:
-- ✅ Tailwind CSS integrated with bun package manager
-- ✅ All components converted to utility-first Tailwind classes (no theming CSS files)
-- ✅ Material Design visual language applied (clean cards, soft shadows, rounded corners)
-- ✅ Accessibility improvements added (focus-visible rings, semantic colors)
-- ✅ Loading states enhanced with skeleton-like spinners and empty state SVG icons
+1. **Sprint 1 (Auth & Layout Shell)**: Migrate `SignInGate.tsx` to Tailwind, create `Layout.tsx`, and wrap routes in `App.tsx`.
+2. **Sprint 2 (Component Cleanup & Assets)**: Migrate `TranscriptView.tsx` container to Tailwind flex, add Inter font links in `index.html`.
+3. **Sprint 3 (Polish & Purge)**: Add ARIA accessibility attributes, clean duplicate headings in `HomeRoute.tsx`, and delete obsolete legacy rules in `App.css`.
