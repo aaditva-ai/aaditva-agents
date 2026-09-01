@@ -2,9 +2,9 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useCampaignEvents } from "./queries";
+import { useCampaignEvents, useAgentHealth, useBenchmarkBriefs, useTriggerJudgeEval } from "./queries";
 import * as authedFetchModule from "./authedFetch";
-import type { EventsPage } from "./types";
+import type { EventsPage, AgentHealthReport, BenchmarkBrief, JudgeEvaluationResult } from "./types";
 
 /**
  * Regression coverage for the bug caught during Step 5 build/validation:
@@ -115,5 +115,117 @@ describe("useCampaignEvents polling", () => {
     // actually happened) rather than the interval treating it as terminal.
     await waitFor(() => expect(authedFetch.mock.calls.length).toBeGreaterThan(callsWhileStalled));
     await waitFor(() => expect(result.current.data?.status).toBe("running"));
+  });
+});
+
+describe("Evaluation API queries", () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+
+  afterEach(() => {
+    queryClient.clear();
+  });
+
+  it("useAgentHealth fetches health report from /evals/health", async () => {
+    const mockReport: AgentHealthReport = {
+      timestamp: "2026-09-01T12:00:00Z",
+      allHealthy: true,
+      services: [
+        {
+          id: "brand_strategist",
+          name: "Brand Strategist",
+          description: "Strategist",
+          url: "http://localhost:8082",
+          status: "online",
+          statusCode: 200,
+          latencyMs: 50,
+        },
+      ],
+    };
+
+    const authedFetch = vi.spyOn(authedFetchModule, "authedFetch").mockResolvedValueOnce(mockReport);
+
+    const { result } = renderHook(() => useAgentHealth(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(authedFetch).toHaveBeenCalledWith("/evals/health");
+    expect(result.current.data?.allHealthy).toBe(true);
+    expect(result.current.data?.services.length).toBe(1);
+  });
+
+  it("useBenchmarkBriefs fetches benchmarks catalog from /evals/benchmarks", async () => {
+    const mockBriefs: BenchmarkBrief[] = [
+      {
+        id: "smart-water-bottle",
+        title: "Smart Water Bottle",
+        prompt: "Instagram campaign...",
+        category: "Full Pipeline",
+        focus: "All 5 specialists",
+        targetRubricCriterion: "Criterion 1",
+        expectedRounds: 1,
+        cooldownSeconds: 15,
+      },
+    ];
+
+    const authedFetch = vi
+      .spyOn(authedFetchModule, "authedFetch")
+      .mockResolvedValueOnce({ benchmarks: mockBriefs });
+
+    const { result } = renderHook(() => useBenchmarkBriefs(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(authedFetch).toHaveBeenCalledWith("/evals/benchmarks");
+    expect(result.current.data?.length).toBe(1);
+    expect(result.current.data?.[0].id).toBe("smart-water-bottle");
+  });
+
+  it("useTriggerJudgeEval triggers evaluation and seeds query cache", async () => {
+    const mockEvalResult: JudgeEvaluationResult = {
+      sessionId: "sess-judge-1",
+      evaluatedAt: "2026-09-01T12:00:00Z",
+      overallScore: 100.0,
+      overallGrade: "Excellent",
+      summary: "Met all criteria",
+      criteria: [
+        {
+          id: 1,
+          name: "Multi-Agent Orchestration",
+          weight: 0.20,
+          score: 100,
+          rating: "Excellent",
+          passed: true,
+          rationale: "Clean orchestration",
+          evidence: ["Sequenced specialists"],
+        },
+      ],
+    };
+
+    const authedFetch = vi
+      .spyOn(authedFetchModule, "authedFetch")
+      .mockResolvedValueOnce(mockEvalResult);
+
+    const { result } = renderHook(() => useTriggerJudgeEval(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    let mutateRes: JudgeEvaluationResult | undefined;
+    await act(async () => {
+      mutateRes = await result.current.mutateAsync({ sessionId: "sess-judge-1" });
+    });
+
+    expect(authedFetch).toHaveBeenCalledWith("/evals/judge", {
+      method: "POST",
+      body: JSON.stringify({ sessionId: "sess-judge-1" }),
+    });
+    expect(mutateRes?.overallScore).toBe(100.0);
+    const cached = queryClient.getQueryData(["campaign", "sess-judge-1", "evaluation"]);
+    expect(cached).toEqual(mockEvalResult);
   });
 });

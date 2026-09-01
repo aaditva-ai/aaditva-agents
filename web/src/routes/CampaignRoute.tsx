@@ -60,6 +60,7 @@ export function CampaignRoute() {
       {query.data && query.data.groups.length > 0 ? (
         <TranscriptView
           transcript={query.data}
+          sessionId={sessionId}
           onResume={RESUMABLE_STATUSES.has(query.data.status) ? () => resume.mutate() : undefined}
           isResuming={resume.isPending}
         />
