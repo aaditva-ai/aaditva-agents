@@ -477,3 +477,76 @@ def test_derive_status_running_and_stale_is_stalled():
     """
     doc = {"status": "running"}
     assert main._derive_status(doc, False) == "stalled"
+
+
+# ---- Evaluation & Judge Routes ----
+
+def test_eval_benchmarks():
+    resp = _client().get("/evals/benchmarks")
+    assert resp.status_code == 200
+    benchmarks = resp.json()["benchmarks"]
+    assert len(benchmarks) == 5
+    ids = [b["id"] for b in benchmarks]
+    assert "smart-water-bottle" in ids
+    assert "artisan-coffee-roaster" in ids
+
+
+def test_eval_health(monkeypatch):
+    async def _mock_health():
+        return {
+            "timestamp": "2026-09-01T12:00:00Z",
+            "allHealthy": True,
+            "services": [
+                {"id": "brand_strategist", "name": "Brand Strategist", "status": "online"},
+                {"id": "copywriter", "name": "Copywriter", "status": "online"},
+            ]
+        }
+    monkeypatch.setattr(main.eval_service, "check_all_health", _mock_health)
+    resp = _client().get("/evals/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["allHealthy"] is True
+    assert len(data["services"]) == 2
+
+
+def test_eval_judge_trigger_happy_path(monkeypatch):
+    session_id = "eval-sess-1"
+    monkeypatch.setattr(
+        campaign_store, "get_campaign",
+        AsyncMock(return_value={"user_id": "user-123", "status": "complete", "prompt": "Test brief"}),
+    )
+    monkeypatch.setattr(main.judge_service, "get_cached_evaluation", AsyncMock(return_value=None))
+    async def _mock_eval(sess_id, prompt, steps):
+        return {
+            "sessionId": sess_id,
+            "overallScore": 100.0,
+            "overallGrade": "Excellent",
+            "criteria": [{"id": 1, "name": "Multi-Agent Orchestration", "score": 100, "passed": True}],
+        }
+    monkeypatch.setattr(main.judge_service, "evaluate_campaign_transcript", _mock_eval)
+    monkeypatch.setattr(sessions_client, "list_events", lambda s, since=None: [])
+
+    resp = _client().post("/evals/judge", json={"sessionId": session_id})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["sessionId"] == session_id
+    assert data["overallScore"] == 100.0
+
+
+def test_eval_judge_returns_cached_evaluation(monkeypatch):
+    session_id = "eval-sess-cached"
+    monkeypatch.setattr(
+        campaign_store, "get_campaign",
+        AsyncMock(return_value={"user_id": "user-123", "status": "complete", "prompt": "Test brief"}),
+    )
+    cached_scorecard = {
+        "sessionId": session_id,
+        "overallScore": 95.0,
+        "overallGrade": "Excellent",
+        "cached": True,
+    }
+    monkeypatch.setattr(main.judge_service, "get_cached_evaluation", AsyncMock(return_value=cached_scorecard))
+
+    resp = _client().post("/evals/judge", json={"sessionId": session_id})
+    assert resp.status_code == 200
+    assert resp.json()["cached"] is True

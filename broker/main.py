@@ -26,6 +26,8 @@ import auth
 import campaign_limits
 import campaign_queue
 import campaign_store
+import eval_service
+import judge_service
 import sessions_client
 from events_normalizer import dedupe_by_id, normalize_events
 
@@ -290,6 +292,70 @@ async def handle_resume_campaign(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "sessionId": session_id})
 
 
+async def handle_eval_health(request: Request) -> JSONResponse:
+    try:
+        report = await eval_service.check_all_health()
+        return JSONResponse(report)
+    except Exception as e:
+        logger.exception("Error during eval health check")
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+
+async def handle_eval_benchmarks(request: Request) -> JSONResponse:
+    return JSONResponse({"benchmarks": eval_service.get_benchmark_briefs()})
+
+
+async def handle_trigger_judge(request: Request) -> JSONResponse:
+    try:
+        user = _require_user(request)
+    except auth.AuthError as e:
+        return JSONResponse({"error": "unauthorized", "detail": str(e)}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    session_id = (body or {}).get("sessionId")
+    if not session_id or not isinstance(session_id, str):
+        return JSONResponse({"error": "missing sessionId"}, status_code=400)
+
+    campaign_doc = await campaign_store.get_campaign(session_id)
+    if campaign_doc is None or campaign_doc.get("user_id") != user.uid:
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    # Check cached evaluation first to minimize AI spend and unnecessary LLM tokens
+    force_reeval = bool((body or {}).get("force", False))
+    if not force_reeval:
+        cached = await judge_service.get_cached_evaluation(session_id)
+        if cached:
+            return JSONResponse(cached)
+
+    steps, _, derived_status = _fetch_steps_and_status(campaign_doc, session_id, since=None)
+    prompt = campaign_doc.get("prompt", "")
+
+    evaluation = await judge_service.evaluate_campaign_transcript(session_id, prompt, steps)
+    return JSONResponse(evaluation)
+
+
+async def handle_get_campaign_eval(request: Request) -> JSONResponse:
+    try:
+        user = _require_user(request)
+    except auth.AuthError as e:
+        return JSONResponse({"error": "unauthorized", "detail": str(e)}, status_code=401)
+
+    session_id = request.path_params["session_id"]
+    campaign_doc = await campaign_store.get_campaign(session_id)
+    if campaign_doc is None or campaign_doc.get("user_id") != user.uid:
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    cached = await judge_service.get_cached_evaluation(session_id)
+    if cached:
+        return JSONResponse(cached)
+
+    return JSONResponse({"sessionId": session_id, "evaluated": False})
+
+
 async def handle_health(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
@@ -318,6 +384,10 @@ app = Starlette(
         Route("/campaigns", handle_list_campaigns, methods=["GET"]),
         Route("/campaigns/{session_id}/events", handle_get_events, methods=["GET"]),
         Route("/campaigns/{session_id}/resume", handle_resume_campaign, methods=["POST"]),
+        Route("/evals/health", handle_eval_health, methods=["GET"]),
+        Route("/evals/benchmarks", handle_eval_benchmarks, methods=["GET"]),
+        Route("/evals/judge", handle_trigger_judge, methods=["POST"]),
+        Route("/evals/campaigns/{session_id}", handle_get_campaign_eval, methods=["GET"]),
         Route("/healthz", handle_health, methods=["GET"]),
     ]
 )
