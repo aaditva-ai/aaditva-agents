@@ -32,7 +32,8 @@ export function RecentCampaigns() {
           <Link
             key={c.sessionId}
             to={`/c/${c.sessionId}`}
-            className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border bg-card hover:bg-accent transition-colors group"
+            className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border bg-card hover:bg-accent transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={`Open campaign: ${c.title || "(untitled campaign)"} (${c.status})`}
           >
             <span
               className={`w-2 h-2 rounded-full flex-shrink-0 ${
@@ -40,6 +41,7 @@ export function RecentCampaigns() {
                 c.status === 'running' ? 'bg-blue-500' :
                 c.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500'
               }`}
+              aria-hidden="true"
             />
             <span className="flex-1 text-sm font-medium tracking-tight">
               {c.title || '(untitled campaign)'}

@@ -3,7 +3,6 @@ import { SignInGate } from "./auth/SignInGate";
 import { Layout } from "./components/Layout";
 import { HomeRoute } from "./routes/HomeRoute";
 import { CampaignRoute } from "./routes/CampaignRoute";
-import "./App.css";
 
 function App() {
   return (
