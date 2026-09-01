@@ -38,3 +38,54 @@ export interface EventsPage {
   status: CampaignStatus;
   steps: Step[];
 }
+
+export interface ServiceHealthItem {
+  id: string;
+  name: string;
+  description: string;
+  url: string;
+  status: "online" | "degraded" | "offline";
+  statusCode: number | null;
+  latencyMs: number;
+  card?: Record<string, any> | null;
+  error?: string | null;
+}
+
+export interface AgentHealthReport {
+  timestamp: string;
+  allHealthy: boolean;
+  services: ServiceHealthItem[];
+}
+
+export interface BenchmarkBrief {
+  id: string;
+  title: string;
+  prompt: string;
+  category: string;
+  focus: string;
+  targetRubricCriterion: string;
+  expectedRounds: number;
+  cooldownSeconds: number;
+}
+
+export interface CriterionEval {
+  id: number;
+  name: string;
+  weight: number;
+  score: number;
+  rating: "Excellent" | "Good" | "Developing" | "Unsatisfactory";
+  passed: boolean;
+  rationale: string;
+  evidence: string[];
+}
+
+export interface JudgeEvaluationResult {
+  sessionId: string;
+  evaluatedAt: string;
+  prompt?: string;
+  overallScore: number;
+  overallGrade: "Excellent" | "Good" | "Developing" | "Unsatisfactory";
+  summary: string;
+  criteria: CriterionEval[];
+  evaluated?: boolean;
+}

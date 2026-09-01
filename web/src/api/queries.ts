@@ -1,7 +1,13 @@
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { authedFetch, ApiError } from "./authedFetch";
-import type { CampaignSummary, EventsPage } from "./types";
+import type {
+  CampaignSummary,
+  EventsPage,
+  AgentHealthReport,
+  BenchmarkBrief,
+  JudgeEvaluationResult,
+} from "./types";
 import { selectTranscript, isTerminal } from "./selectTranscript";
 
 /**
@@ -142,4 +148,69 @@ export function useCampaignEvents(sessionId: string | undefined) {
   }, [sessionId, status, fetchNextPage, isFetchingNextPage]);
 
   return query;
+}
+
+// ---- Evaluation Dashboard & LLM Judge Hooks ----
+
+async function fetchAgentHealth(): Promise<AgentHealthReport> {
+  return authedFetch("/evals/health") as Promise<AgentHealthReport>;
+}
+
+export function useAgentHealth(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["evals", "health"],
+    queryFn: fetchAgentHealth,
+    enabled: options?.enabled ?? true,
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
+  });
+}
+
+async function fetchBenchmarkBriefs(): Promise<{ benchmarks: BenchmarkBrief[] }> {
+  return authedFetch("/evals/benchmarks") as Promise<{ benchmarks: BenchmarkBrief[] }>;
+}
+
+export function useBenchmarkBriefs() {
+  return useQuery({
+    queryKey: ["evals", "benchmarks"],
+    queryFn: fetchBenchmarkBriefs,
+    select: (data) => data.benchmarks,
+    staleTime: 5 * 60_000,
+  });
+}
+
+async function triggerJudgeEval(params: {
+  sessionId: string;
+  force?: boolean;
+}): Promise<JudgeEvaluationResult> {
+  return authedFetch("/evals/judge", {
+    method: "POST",
+    body: JSON.stringify(params),
+  }) as Promise<JudgeEvaluationResult>;
+}
+
+export function useTriggerJudgeEval() {
+  const queryClient = useQueryClient();
+  return useMutation<JudgeEvaluationResult, ApiError, { sessionId: string; force?: boolean }>({
+    mutationFn: triggerJudgeEval,
+    onSuccess: (data, variables) => {
+      queryClient.setQueryData(["campaign", variables.sessionId, "evaluation"], data);
+    },
+  });
+}
+
+async function fetchCampaignEvaluation(sessionId: string): Promise<JudgeEvaluationResult> {
+  return authedFetch(`/evals/campaigns/${sessionId}`) as Promise<JudgeEvaluationResult>;
+}
+
+export function useCampaignEvaluation(sessionId: string | undefined) {
+  return useQuery({
+    queryKey: ["campaign", sessionId, "evaluation"],
+    queryFn: () => {
+      if (!sessionId) throw new Error("No session ID");
+      return fetchCampaignEvaluation(sessionId);
+    },
+    enabled: Boolean(sessionId),
+    staleTime: 60_000,
+  });
 }
