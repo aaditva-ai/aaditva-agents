@@ -29,7 +29,97 @@ live Agent Engine (see scripts/spikes/README.md):
 """
 from __future__ import annotations
 
+import datetime
+import os
+import urllib.request
 from typing import Any
+
+_SIGNED_URL_CACHE: dict[str, str] = {}
+
+
+def get_signed_url(gcs_uri: str) -> str:
+    """Generate a signed GET URL for a gs:// URI, with in-memory caching."""
+    if not gcs_uri or not isinstance(gcs_uri, str):
+        return gcs_uri or ""
+    if not gcs_uri.startswith("gs://"):
+        return gcs_uri
+    if gcs_uri in _SIGNED_URL_CACHE:
+        return _SIGNED_URL_CACHE[gcs_uri]
+
+    without_prefix = gcs_uri[len("gs://"):]
+    if "/" not in without_prefix:
+        return gcs_uri
+    bucket_name, blob_path = without_prefix.split("/", 1)
+    fallback_url = f"https://storage.googleapis.com/{bucket_name}/{blob_path}"
+
+    try:
+        from google.cloud import storage
+        import google.auth
+
+        project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT_ID")
+        storage_client = storage.Client(project=project_id)
+        bucket = storage_client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+
+        credentials, _ = google.auth.default()
+
+        sa_email = os.environ.get("SIGNING_SERVICE_ACCOUNT") or getattr(
+            credentials, "service_account_email", None
+        )
+
+        if sa_email == "default":
+            try:
+                req = urllib.request.Request(
+                    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email",
+                    headers={"Metadata-Flavor": "Google"},
+                )
+                sa_email = urllib.request.urlopen(req, timeout=1).read().decode().strip()
+            except Exception:
+                sa_email = None
+
+        if sa_email and sa_email != "default":
+            try:
+                from google.auth import iam as google_auth_iam
+                from google.auth.transport import requests as google_auth_requests
+                from google.oauth2 import service_account as sa_module
+
+                request = google_auth_requests.Request()
+                credentials.refresh(request)
+
+                signer = google_auth_iam.Signer(
+                    request=request,
+                    credentials=credentials,
+                    service_account_email=sa_email,
+                )
+                sign_credentials = sa_module.Credentials(
+                    signer=signer,
+                    service_account_email=sa_email,
+                    token_uri="https://oauth2.googleapis.com/token",
+                )
+                url = blob.generate_signed_url(
+                    version="v4",
+                    expiration=datetime.timedelta(hours=1),
+                    method="GET",
+                    credentials=sign_credentials,
+                )
+                _SIGNED_URL_CACHE[gcs_uri] = url
+                return url
+            except Exception:
+                pass
+
+        try:
+            url = blob.generate_signed_url(
+                version="v4",
+                expiration=datetime.timedelta(hours=1),
+                method="GET",
+            )
+            _SIGNED_URL_CACHE[gcs_uri] = url
+            return url
+        except Exception:
+            _SIGNED_URL_CACHE[gcs_uri] = fallback_url
+            return fallback_url
+    except Exception:
+        return fallback_url
 
 
 def _get(obj: Any, name: str, default=None):
@@ -153,6 +243,24 @@ def normalize_events(events: list[Any]) -> list[dict]:
 
             if function_call is not None:
                 name = _get(function_call, "name")
+                if name == "display_image":
+                    args = _get(function_call, "args") or {}
+                    gcs_uri = _get(args, "gcs_uri") or _get(args, "gcs_url") or _get(args, "uri") or _get(args, "url")
+                    concept_name = _get(args, "concept_name") or _get(args, "title") or _get(args, "name")
+                    if gcs_uri:
+                        signed_url = get_signed_url(gcs_uri)
+                        steps.append({
+                            "id": f"{event_id}:{part_index}",
+                            "author": author,
+                            "invocationId": invocation_id,
+                            "kind": "image",
+                            "toolName": name,
+                            "imageUrl": signed_url,
+                            "text": str(concept_name) if concept_name is not None else None,
+                            "timestamp": timestamp,
+                        })
+                        part_index += 1
+                        continue
                 if name:
                     steps.append({
                         "id": f"{event_id}:{part_index}",

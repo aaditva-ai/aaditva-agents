@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from events_normalizer import dedupe_by_id, normalize_events  # noqa: E402
+from events_normalizer import _SIGNED_URL_CACHE, dedupe_by_id, get_signed_url, normalize_events  # noqa: E402
 
 SESSION_PREFIX = "projects/p/locations/l/reasoningEngines/e/sessions/s/events"
 
@@ -76,6 +76,59 @@ def test_get_image_links_response_becomes_image_steps():
     assert steps[0]["imageUrl"] == "https://storage.googleapis.com/a.png?sig=1"
     assert steps[0]["text"] == "Post 1"
     assert steps[1]["imageUrl"] == "https://storage.googleapis.com/b.png?sig=2"
+
+
+def test_display_image_function_call_becomes_image_step_with_signed_url(monkeypatch):
+    monkeypatch.setattr(
+        "events_normalizer.get_signed_url",
+        lambda uri: f"https://signed.example.com/{uri.replace('gs://', '')}?signed=true",
+    )
+    events = [_event("5-call", "creative_director", [
+        {"function_call": {
+            "name": "display_image",
+            "args": {"gcs_uri": "gs://bucket/assets/image1.png", "concept_name": "Hydration Poster"},
+        }},
+    ])]
+    steps = normalize_events(events)
+    assert len(steps) == 1
+    assert steps[0]["kind"] == "image"
+    assert steps[0]["toolName"] == "display_image"
+    assert steps[0]["imageUrl"] == "https://signed.example.com/bucket/assets/image1.png?signed=true"
+    assert steps[0]["text"] == "Hydration Poster"
+
+
+def test_display_image_function_call_without_gcs_uri_falls_back_to_tool_call():
+    events = [_event("5-call-empty", "creative_director", [
+        {"function_call": {"name": "display_image", "args": {}}},
+    ])]
+    steps = normalize_events(events)
+    assert len(steps) == 1
+    assert steps[0]["kind"] == "tool_call"
+    assert steps[0]["toolName"] == "display_image"
+
+
+def test_get_signed_url_caching_and_fallback(monkeypatch):
+    _SIGNED_URL_CACHE.clear()
+    uri = "gs://test-bucket/sample.png"
+    url = get_signed_url(uri)
+    assert url.startswith("https://storage.googleapis.com/test-bucket/sample.png")
+    assert _SIGNED_URL_CACHE[uri] == url
+
+    # Cached hit returns the exact same URL without re-computing
+    assert get_signed_url(uri) == url
+
+    # Non-gs uris return unmodified
+    assert get_signed_url("https://example.com/test.png") == "https://example.com/test.png"
+    assert get_signed_url("") == ""
+
+    # Test fallback when exception occurs
+    _SIGNED_URL_CACHE.clear()
+    import google.cloud.storage
+    def _raise(*args, **kwargs):
+        raise RuntimeError("storage error")
+    monkeypatch.setattr(google.cloud.storage, "Client", _raise)
+    fallback = get_signed_url("gs://fallback-bucket/img.png")
+    assert fallback == "https://storage.googleapis.com/fallback-bucket/img.png"
 
 
 def test_display_image_tool_result_is_a_plain_tool_result_not_an_image():
