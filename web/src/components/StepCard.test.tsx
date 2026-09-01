@@ -108,7 +108,49 @@ describe("StepCard markdown rendering", () => {
 
     expect(screen.getByLabelText("Tool call: brand_strategist")).toBeDefined();
     expect(screen.getByLabelText("Tool result for brand_strategist")).toBeDefined();
-    expect(screen.getByAltText("Generated campaign asset: Visual campaign post 1")).toBeDefined();
+    const img = screen.getByAltText("Generated campaign asset: Visual campaign post 1") as HTMLImageElement;
+    expect(img).toBeDefined();
+    expect(img.src).toBe("https://example.com/asset.png");
+    expect(screen.getByText("Visual campaign post 1")).toBeDefined();
     expect(screen.getByLabelText("Agent handoff transfer")).toBeDefined();
+  });
+
+  it("renders inline image whenever imageUrl is provided on any step kind", () => {
+    const group: StepGroup = {
+      key: "group-4",
+      author: "creative_director",
+      invocationId: "inv-4",
+      steps: [
+        {
+          id: "step-tc-img",
+          author: "creative_director",
+          invocationId: "inv-4",
+          kind: "tool_call",
+          toolName: "display_image",
+          imageUrl: "https://signed.example.com/inline-call.png",
+          text: "Inline Call Asset",
+          timestamp: "2026-09-01T15:43:00Z",
+        },
+        {
+          id: "step-text-img",
+          author: "creative_director",
+          invocationId: "inv-4",
+          kind: "text",
+          text: "Here is the poster:",
+          imageUrl: "https://signed.example.com/inline-text.png",
+          timestamp: "2026-09-01T15:43:00Z",
+        },
+      ],
+    };
+
+    render(<StepCard group={group} />);
+
+    const callImg = screen.getByAltText("Generated campaign asset: Inline Call Asset") as HTMLImageElement;
+    expect(callImg).toBeDefined();
+    expect(callImg.src).toBe("https://signed.example.com/inline-call.png");
+
+    const textImg = screen.getByAltText("Generated campaign asset: Here is the poster:") as HTMLImageElement;
+    expect(textImg).toBeDefined();
+    expect(textImg.src).toBe("https://signed.example.com/inline-text.png");
   });
 });

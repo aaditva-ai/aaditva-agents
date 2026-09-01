@@ -21,69 +21,91 @@ export function StepCard({ group }: { group: StepGroup }) {
 }
 
 function StepView({ step }: { step: Step }) {
+  const inlineImage = step.imageUrl ? (
+    <figure className="my-3">
+      <img
+        src={step.imageUrl}
+        alt={step.text ? `Generated campaign asset: ${step.text}` : "Generated campaign visual output"}
+        loading="lazy"
+        className="rounded-lg border border-border shadow-sm hover:shadow-md transition-shadow max-w-full h-auto"
+      />
+      {step.text && (
+        <figcaption className="mt-1.5 text-xs text-muted-foreground font-medium">
+          {step.text}
+        </figcaption>
+      )}
+    </figure>
+  ) : null;
+
   switch (step.kind) {
     case "text":
-      return <MarkdownContent content={step.text ?? ""} />;
+      return (
+        <>
+          <MarkdownContent content={step.text ?? ""} />
+          {inlineImage}
+        </>
+      );
     case "tool_call":
       return (
-        <span
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-medium border border-blue-200 dark:border-blue-900 w-fit"
-          aria-label={`Tool call: ${step.toolName}`}
-        >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-            <path d="M8 5l8 6-8 6V5z" />
-          </svg>
-          <span>{step.toolName}</span>
-        </span>
+        <div className="flex flex-col gap-1.5">
+          <span
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-medium border border-blue-200 dark:border-blue-900 w-fit"
+            aria-label={`Tool call: ${step.toolName}`}
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M8 5l8 6-8 6V5z" />
+            </svg>
+            <span>{step.toolName}</span>
+          </span>
+          {inlineImage}
+        </div>
       );
     case "tool_result":
       return (
-        <details className="group my-1">
-          <summary
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md cursor-pointer text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 border border-emerald-200 dark:border-emerald-900 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
-            aria-label={`Tool result for ${step.toolName}`}
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <path d="M20 6L9 17l-5-5" />
-            </svg>
-            <span>✓ {step.toolName}</span>
-          </summary>
-          <div className="p-2.5 mt-1.5 text-xs bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-200 rounded-md border border-emerald-200/60 dark:border-emerald-900 font-mono whitespace-pre-wrap break-words">
-            {step.text}
-          </div>
-        </details>
+        <div className="flex flex-col gap-1.5">
+          <details className="group my-1">
+            <summary
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md cursor-pointer text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 border border-emerald-200 dark:border-emerald-900 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+              aria-label={`Tool result for ${step.toolName}`}
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+              <span>✓ {step.toolName}</span>
+            </summary>
+            <div className="p-2.5 mt-1.5 text-xs bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-200 rounded-md border border-emerald-200/60 dark:border-emerald-900 font-mono whitespace-pre-wrap break-words">
+              {step.text}
+            </div>
+          </details>
+          {inlineImage}
+        </div>
       );
     case "image":
       return (
-        <figure className="my-3">
-          <img
-            src={step.imageUrl}
-            alt={step.text ? `Generated campaign asset: ${step.text}` : "Generated campaign visual output"}
-            loading="lazy"
-            className="rounded-lg border border-border shadow-sm hover:shadow-md transition-shadow max-w-full h-auto"
-          />
-          {step.text && (
-            <figcaption className="mt-1.5 text-xs text-muted-foreground font-medium">
-              {step.text}
-            </figcaption>
-          )}
-        </figure>
+        inlineImage ?? (
+          <div className="p-2.5 my-1 text-xs text-muted-foreground italic border border-dashed border-border rounded-md">
+            {step.text || "Image visual asset"}
+          </div>
+        )
       );
     case "transfer":
       return (
-        <span
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 text-xs font-medium border border-purple-200 dark:border-purple-900 w-fit"
-          aria-label="Agent handoff transfer"
-        >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-            <circle cx="6" cy="6" r="3" />
-            <line x1="19" y1="6" x2="6" y2="19" />
-            <rect width="8" height="8" x="6" y="6" />
-          </svg>
-          <span>Handed off</span>
-        </span>
+        <div className="flex flex-col gap-1.5">
+          <span
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 text-xs font-medium border border-purple-200 dark:border-purple-900 w-fit"
+            aria-label="Agent handoff transfer"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <circle cx="6" cy="6" r="3" />
+              <line x1="19" y1="6" x2="6" y2="19" />
+              <rect width="8" height="8" x="6" y="6" />
+            </svg>
+            <span>Handed off</span>
+          </span>
+          {inlineImage}
+        </div>
       );
     default:
-      return null;
+      return inlineImage;
   }
 }
