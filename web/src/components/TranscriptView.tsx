@@ -18,7 +18,7 @@ export function TranscriptView({
   isResuming?: boolean;
 }) {
   return (
-    <div className="transcript">
+    <div className="flex flex-col gap-3 w-full pb-8">
       <StatusBanner status={transcript.status} onResume={onResume} isResuming={isResuming} />
       {transcript.groups.map((group) => (
         <StepCard key={group.key} group={group} />
