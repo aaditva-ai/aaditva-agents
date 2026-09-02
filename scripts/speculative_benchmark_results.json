@@ -1,0 +1,58 @@
+[
+  {
+    "model": "qwen2.5-coder-3b-instruct",
+    "status": "SUCCESS",
+    "time": 17.340921640396118,
+    "start_ram": 22.7,
+    "end_ram": 35.9,
+    "prompt_tokens": 133,
+    "completion_tokens": 256,
+    "reasoning_tokens": 0,
+    "preview": "To refactor the `bubble_sort` function for better efficiency, we can make a few improvements:\n\n1. **Early Termination**: If no elements are swapped during an iteration, it means the array is already s"
+  },
+  {
+    "model": "stable-code-instruct-3b-i1",
+    "status": "SUCCESS",
+    "time": 15.73609209060669,
+    "start_ram": 35.9,
+    "end_ram": 51.4,
+    "prompt_tokens": 156,
+    "completion_tokens": 256,
+    "reasoning_tokens": 0,
+    "preview": "The given Python function implements the Bubble Sort algorithm. However, the current implementation is not very efficient as it has a worst-case time complexity of O(n^2), where n is the number of ele"
+  },
+  {
+    "model": "deepseek-coder-v2-lite-instruct",
+    "status": "HTTPError 400",
+    "error": "{\n    \"error\": {\n        \"message\": \"Failed to load model \\\"deepseek-coder-v2-lite-instruct\\\". Error: Failed to load model.\",\n        \"type\": \"invalid_request_error\",\n        \"param\": \"model\",\n        \"code\": null\n    }\n}",
+    "time": 17.43627429008484
+  },
+  {
+    "model": "deepseek/deepseek-r1-0528-qwen3-8b",
+    "status": "HTTPError 400",
+    "error": "{\n    \"error\": {\n        \"message\": \"Failed to load model \\\"deepseek/deepseek-r1-0528-qwen3-8b\\\". Error: Failed to load model.\",\n        \"type\": \"invalid_request_error\",\n        \"param\": \"model\",\n        \"code\": null\n    }\n}",
+    "time": 10.616182327270508
+  },
+  {
+    "model": "google/gemma-4-e4b",
+    "status": "SUCCESS",
+    "time": 27.210697174072266,
+    "start_ram": 21.4,
+    "end_ram": 59.0,
+    "prompt_tokens": 158,
+    "completion_tokens": 256,
+    "reasoning_tokens": 253,
+    "preview": ""
+  },
+  {
+    "model": "qwen/qwen2.5-coder-14b",
+    "status": "SUCCESS",
+    "time": 58.74566912651062,
+    "start_ram": 59.0,
+    "end_ram": 89.6,
+    "prompt_tokens": 133,
+    "completion_tokens": 256,
+    "reasoning_tokens": 0,
+    "preview": "The provided `bubble_sort` function is a basic implementation of the bubble sort algorithm. While it works correctly, there are several ways to make it more efficient and readable. Here's a refactored"
+  }
+]

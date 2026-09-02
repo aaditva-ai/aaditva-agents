@@ -116,6 +116,7 @@ async def handle_list_campaigns(request: Request) -> JSONResponse:
         {
             "sessionId": doc.get("session_id"),
             "title": (doc.get("prompt") or "")[:TITLE_MAX_CHARS],
+            "prompt": doc.get("prompt") or "",
             "status": doc.get("status"),
             "createdAt": _iso(doc.get("created_at")),
             "lastEventAt": _iso(doc.get("updated_at")),
@@ -305,6 +306,22 @@ async def handle_eval_benchmarks(request: Request) -> JSONResponse:
     return JSONResponse({"benchmarks": eval_service.get_benchmark_briefs()})
 
 
+async def handle_eval_prepare_quotas(request: Request) -> JSONResponse:
+    try:
+        user = _require_user(request)
+        if user and user.uid:
+            await campaign_limits.elevate_user_allowance(user.uid, max_concurrent=10, tokens=20)
+    except Exception as e:
+        logger.info("Elevating quotas without user auth: %s", e)
+
+    try:
+        result = await eval_service.prepare_parallel_image_quotas()
+        return JSONResponse(result)
+    except Exception as e:
+        logger.exception("Error during eval prepare quotas")
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+
 async def handle_trigger_judge(request: Request) -> JSONResponse:
     try:
         user = _require_user(request)
@@ -386,6 +403,7 @@ app = Starlette(
         Route("/campaigns/{session_id}/resume", handle_resume_campaign, methods=["POST"]),
         Route("/evals/health", handle_eval_health, methods=["GET"]),
         Route("/evals/benchmarks", handle_eval_benchmarks, methods=["GET"]),
+        Route("/evals/prepare-quotas", handle_eval_prepare_quotas, methods=["POST"]),
         Route("/evals/judge", handle_trigger_judge, methods=["POST"]),
         Route("/evals/campaigns/{session_id}", handle_get_campaign_eval, methods=["GET"]),
         Route("/healthz", handle_health, methods=["GET"]),

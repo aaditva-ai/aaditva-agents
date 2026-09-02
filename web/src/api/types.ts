@@ -28,6 +28,7 @@ export interface Step {
 export interface CampaignSummary {
   sessionId: string;
   title: string;
+  prompt?: string;
   status: CampaignDocStatus;
   createdAt: string | null;
   lastEventAt: string | null;
@@ -88,4 +89,16 @@ export interface JudgeEvaluationResult {
   summary: string;
   criteria: CriterionEval[];
   evaluated?: boolean;
+}
+
+export interface QuotaStatusResponse {
+  status: "ready" | "pending" | "error";
+  elevated: boolean;
+  model: string;
+  targetRpm: number;
+  regions: string[];
+  queueName?: string;
+  projectId?: string;
+  timestamp?: string;
+  message: string;
 }

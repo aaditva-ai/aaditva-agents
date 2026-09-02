@@ -190,6 +190,10 @@ async def deploy() -> None:
         "AGENT_ENGINE_ID": agent_engine_id,
         "CAMPAIGN_TASKS_INVOKER_SA": invoker_sa,
     }
+    if os.getenv("CAMPAIGN_DRIVER_MAX_DRAIN_RETRIES"):
+        env_vars["CAMPAIGN_DRIVER_MAX_DRAIN_RETRIES"] = os.getenv("CAMPAIGN_DRIVER_MAX_DRAIN_RETRIES")
+    if os.getenv("CAMPAIGN_DRIVER_RETRY_BACKOFF_SECONDS"):
+        env_vars["CAMPAIGN_DRIVER_RETRY_BACKOFF_SECONDS"] = os.getenv("CAMPAIGN_DRIVER_RETRY_BACKOFF_SECONDS")
     env_vars_file = _write_env_vars_file(env_vars)
 
     cmd = [

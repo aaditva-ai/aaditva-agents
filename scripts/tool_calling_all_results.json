@@ -1,0 +1,58 @@
+[
+  {
+    "model": "google/gemma-4-e4b",
+    "speculative_draft": "qwen2.5-0.5b-instruct",
+    "status": "SUCCESS",
+    "has_tool_call": true,
+    "tool_call_name": "file_read",
+    "time_seconds": 7.73,
+    "prompt_tokens": 225,
+    "completion_tokens": 79,
+    "reasoning_tokens": 54,
+    "ram_usage_pct": 52.1,
+    "memory_footprint_gb": 5.89,
+    "verdict": "WINNER - Fast (7.73s), 100% native OpenAI tool-calling compliance, low memory overhead."
+  },
+  {
+    "model": "qwen/qwen3.5-9b",
+    "speculative_draft": "qwen2.5-0.5b-instruct",
+    "status": "SUCCESS",
+    "has_tool_call": true,
+    "tool_call_name": "file_read",
+    "time_seconds": 14.19,
+    "prompt_tokens": 462,
+    "completion_tokens": 84,
+    "reasoning_tokens": 53,
+    "ram_usage_pct": 53.3,
+    "memory_footprint_gb": 6.10,
+    "verdict": "EXCELLENT - Highly capable, native tool-calling compliance, fast generation with speculative draft."
+  },
+  {
+    "model": "qwen2.5-coder-3b-instruct",
+    "speculative_draft": "qwen2.5-0.5b-instruct",
+    "status": "SUCCESS",
+    "has_tool_call": false,
+    "tool_call_name": null,
+    "time_seconds": 15.07,
+    "prompt_tokens": 340,
+    "completion_tokens": 33,
+    "reasoning_tokens": 0,
+    "ram_usage_pct": 36.5,
+    "memory_footprint_gb": 1.80,
+    "verdict": "PLAIN TEXT JSON - Outputs raw markdown JSON instead of OpenAI tool_calls structure."
+  },
+  {
+    "model": "deepseek/deepseek-r1-0528-qwen3-8b",
+    "speculative_draft": "qwen2.5-0.5b-instruct",
+    "status": "SUCCESS",
+    "has_tool_call": false,
+    "tool_call_name": null,
+    "time_seconds": 22.43,
+    "prompt_tokens": 50,
+    "completion_tokens": 256,
+    "reasoning_tokens": 163,
+    "ram_usage_pct": 48.3,
+    "memory_footprint_gb": 4.68,
+    "verdict": "FAILED TOOL USE - Over-indexes on reasoning monologue (<think>), refuses file access."
+  }
+]

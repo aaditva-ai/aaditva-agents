@@ -101,11 +101,8 @@ async def grant_iam(project_id: str, broker_sa: str, invoker_sa: str) -> None:
     print(f"   {'✓' if rc_act == 0 else '⚠️ '} roles/iam.serviceAccountUser on {invoker_sa} -> {broker_sa}" + ("" if rc_act == 0 else f": {err_act.strip()}"))
 
     # Bucket-level URL-signing: iam.serviceAccountTokenCreator on itself,
-    # mirroring the SIGNING_SERVICE_ACCOUNT pattern from
-    # deploy_all_specialists.py -- not currently exercised by any broker
-    # route (image URLs come pre-signed via get_image_links, per Step 3's
-    # decision), granted defensively since Functional Requirement 6 names
-    # URL-signing as a broker responsibility.
+    # and Storage Object Admin / Viewer on the GCS bucket so signed URLs
+    # minted by broker-sa can be read by clients without 403 Forbidden.
     rc_tok, _, err_tok = await run_command_async([
         GCLOUD_CMD, "iam", "service-accounts", "add-iam-policy-binding", broker_sa,
         f"--member=serviceAccount:{broker_sa}",
@@ -114,6 +111,22 @@ async def grant_iam(project_id: str, broker_sa: str, invoker_sa: str) -> None:
         "--quiet",
     ])
     print(f"   {'✓' if rc_tok == 0 else 'ℹ️ '} roles/iam.serviceAccountTokenCreator on {broker_sa}" + ("" if rc_tok == 0 else f": {err_tok.strip()}"))
+
+    bucket = os.getenv("GCS_IMAGES_BUCKET")
+    if bucket:
+        rc_gcs, _, err_gcs = await run_command_async([
+            GCLOUD_CMD, "storage", "buckets", "add-iam-policy-binding",
+            f"gs://{bucket}",
+            f"--member=serviceAccount:{broker_sa}",
+            "--role=roles/storage.objectAdmin",
+            f"--project={project_id}",
+            "--quiet",
+        ])
+        if rc_gcs == 0:
+            print(f"   ✓ Granted roles/storage.objectAdmin on gs://{bucket} to {broker_sa}")
+        else:
+            print(f"   ⚠️  Could not grant storage.objectAdmin to {broker_sa}: {err_gcs.strip()}")
+            print(f"      Run manually: gcloud storage buckets add-iam-policy-binding gs://{bucket} --member=serviceAccount:{broker_sa} --role=roles/storage.objectAdmin")
 
 
 async def ensure_firestore_index(project_id: str) -> None:
@@ -182,6 +195,8 @@ async def deploy() -> None:
     broker_sa = await ensure_service_account(BROKER_SA_NAME, "Broker", project_id)
 
     allowed_origins = os.getenv("BROKER_ALLOWED_ORIGINS", "")
+    gcs_bucket = os.getenv("GCS_IMAGES_BUCKET", "")
+    signing_sa = os.getenv("SIGNING_SERVICE_ACCOUNT", "")
     env_vars = {
         "GOOGLE_CLOUD_PROJECT": project_id,
         "CLOUD_RUN_REGION": region,
@@ -197,6 +212,10 @@ async def deploy() -> None:
         "CRITIC_AGENT_URL": os.getenv("CRITIC_AGENT_URL", ""),
         "PM_AGENT_URL": os.getenv("PM_AGENT_URL", ""),
     }
+    if gcs_bucket:
+        env_vars["GCS_IMAGES_BUCKET"] = gcs_bucket
+    if signing_sa:
+        env_vars["SIGNING_SERVICE_ACCOUNT"] = signing_sa
     env_vars_file = _write_env_vars_file(env_vars)
 
     cmd = [

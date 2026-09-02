@@ -17,6 +17,7 @@ finished" rather than an immediate failure, consistent with that finding.
 import asyncio
 import logging
 import os
+from typing import Any
 
 from dotenv import load_dotenv
 from google.auth.transport import requests as google_auth_requests
@@ -50,7 +51,12 @@ CAMPAIGN_TASK_HANDLER_URL = os.environ.get("CAMPAIGN_TASK_HANDLER_URL")
 # error (see the module docstring) -- this bounds retries for the case where
 # it genuinely has not.
 MAX_DRAIN_RETRIES = int(os.environ.get("CAMPAIGN_DRIVER_MAX_DRAIN_RETRIES", "3"))
-DRAIN_RETRY_BACKOFF_SECONDS = float(os.environ.get("CAMPAIGN_DRIVER_RETRY_BACKOFF_SECONDS", "5"))
+DRAIN_RETRY_BACKOFF_SECONDS = float(os.environ.get("CAMPAIGN_DRIVER_RETRY_BACKOFF_SECONDS", "10"))
+CONTINUATION_PROMPT = (
+    "Continue the campaign from where you left off. Do not repeat "
+    "any specialist calls that already returned a result above -- "
+    "pick up with the next step."
+)
 
 _auth_request = google_auth_requests.Request()
 _client = None
@@ -100,73 +106,170 @@ def _verify_cloud_tasks_oidc_token(authorization_header: str) -> bool:
     return claims.get("email") == CAMPAIGN_TASKS_INVOKER_SA
 
 
+def _get_event_attr(obj: Any, attr: str, default=None):
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(attr, default)
+    return getattr(obj, attr, default)
+
+
+def _is_campaign_terminal(events: list) -> bool:
+    """Inspects session events to determine if the campaign reached terminal completion.
+
+    Checks for:
+    1. project_manager function_call or function_response (Step 5 execution).
+    2. Notion status, project timeline, or deliverables checklist in text or responses.
+    3. Final campaign presentation or completion text from the orchestrator.
+    """
+    if not events:
+        return False
+
+    terminal_keywords = (
+        "project timeline",
+        "notion status",
+        "deliverables checklist",
+        "campaign presentation",
+        "project manager complete",
+        "all deliverables complete",
+        "phase 1: strategy",
+        "phase 1: research",
+        "phase 1:",
+    )
+
+    for event in reversed(events):
+        content = _get_event_attr(event, "content")
+        parts = _get_event_attr(content, "parts") or []
+        for part in parts:
+            fn_call = _get_event_attr(part, "function_call")
+            if fn_call is not None:
+                name = str(_get_event_attr(fn_call, "name") or "")
+                if name == "project_manager" or name.startswith("API-"):
+                    return True
+
+            fn_resp = _get_event_attr(part, "function_response")
+            if fn_resp is not None:
+                name = str(_get_event_attr(fn_resp, "name") or "")
+                if name == "project_manager":
+                    return True
+                resp = _get_event_attr(fn_resp, "response")
+                resp_str = str(resp or "").lower()
+                if any(kw in resp_str for kw in terminal_keywords):
+                    return True
+
+            text = _get_event_attr(part, "text")
+            if text and isinstance(text, str):
+                text_lower = text.lower()
+                if any(kw in text_lower for kw in terminal_keywords):
+                    return True
+
+        actions = _get_event_attr(event, "actions")
+        if actions:
+            actions_str = str(actions).lower()
+            if "project_manager" in actions_str:
+                return True
+
+    return False
+
+
+async def _get_session_events(client, session_name: str) -> list:
+    return list(client.agent_engines.sessions.events.list(name=session_name))
+
+
 async def _session_event_count(client, session_name: str) -> int:
-    events = list(client.agent_engines.sessions.events.list(name=session_name))
+    events = await _get_session_events(client, session_name)
     return len(events)
 
 
 async def _drain(client, agent_engine, session_name: str, user_id: str, session_id: str, message: str) -> int:
-    """Drain `async_stream_query` to completion, never breaking early --
-    required for ADK's post-run event compaction to have a chance to run
-    (runners.py:515-519; Step 1 found it did not fire on campaigns this
-    small, but the drive must still not preclude it for larger ones).
+    """Drain `async_stream_query` to completion, verifying terminal state.
 
-    On a mid-stream error, re-reads the durable session before deciding
-    whether to retry: if the backend kept going and the event count is no
-    longer growing across a short wait, we treat the drive as complete
-    rather than retrying a campaign that already finished server-side (see
-    module docstring). Otherwise it retries by re-invoking on the same
-    session_id, relying on the same continue-from-history behavior Step 1's
-    spike_resume confirmed.
+    On stream completion or mid-stream disconnection/error, inspects durable
+    session events for terminal markers (Project Manager output / final presentation).
+    If not yet terminal, re-invokes `async_stream_query` with a continuation prompt
+    up to `MAX_DRAIN_RETRIES` to guarantee that all planned specialist stages execute.
+    Returns the total durable event count.
     """
     attempt = 0
     next_message = message
     last_error: Exception | None = None
 
     while attempt <= MAX_DRAIN_RETRIES:
-        event_count = 0
+        stream_chunks = 0
         try:
             async for _event in agent_engine.async_stream_query(
                 user_id=user_id, session_id=session_id, message=next_message
             ):
-                event_count += 1
-            return event_count
-        except Exception as e:  # noqa: BLE001 -- deliberately broad: any
-            # stream failure (503s observed in Step 1, but not exclusively)
-            # should fall through to the same server-truth check below.
+                stream_chunks += 1
+
+            # Stream finished without raising. Verify if campaign reached terminal state.
+            events = await _get_session_events(client, session_name)
+            is_terminal = _is_campaign_terminal(events)
+            total_events = len(events)
+            logger.info(
+                "Stream turn finished for session %s (attempt %d/%d, stream_chunks=%d, total_events=%d, terminal=%s)",
+                session_id, attempt, MAX_DRAIN_RETRIES, stream_chunks, total_events, is_terminal,
+            )
+
+            if is_terminal:
+                return total_events
+
+            attempt += 1
+            if attempt > MAX_DRAIN_RETRIES:
+                logger.warning(
+                    "Session %s completed stream turn but did not reach terminal state after %d attempts (%d events).",
+                    session_id, attempt - 1, total_events,
+                )
+                return total_events
+
+            logger.info(
+                "Session %s stream turn ended before terminal state (%d events); waiting %.1fs and sending continuation prompt.",
+                session_id, total_events, DRAIN_RETRY_BACKOFF_SECONDS,
+            )
+            await asyncio.sleep(DRAIN_RETRY_BACKOFF_SECONDS)
+            next_message = CONTINUATION_PROMPT
+
+        except Exception as e:  # noqa: BLE001
             last_error = e
             attempt += 1
             logger.warning(
                 "async_stream_query raised on session %s (attempt %d/%d): %s",
                 session_id, attempt, MAX_DRAIN_RETRIES, e,
             )
+
+            # Check server-side session events
+            try:
+                events = await _get_session_events(client, session_name)
+                total_events = len(events)
+                is_terminal = _is_campaign_terminal(events)
+            except Exception as read_err:
+                logger.warning("Failed to read session events for %s after stream error: %s", session_id, read_err)
+                events = []
+                total_events = 0
+                is_terminal = False
+
+            if is_terminal:
+                logger.info(
+                    "Session %s reached terminal state server-side despite stream error (%d events); concluding drive.",
+                    session_id, total_events,
+                )
+                return total_events
+
             if attempt > MAX_DRAIN_RETRIES:
+                logger.error(
+                    "Session %s exhausted retries (%d/%d) without reaching terminal state (%d events).",
+                    session_id, attempt, MAX_DRAIN_RETRIES, total_events,
+                )
                 break
 
-            await asyncio.sleep(DRAIN_RETRY_BACKOFF_SECONDS)
-            count_before = await _session_event_count(client, session_name)
-            await asyncio.sleep(DRAIN_RETRY_BACKOFF_SECONDS)
-            count_after = await _session_event_count(client, session_name)
-            if count_after == count_before and count_after > 0:
-                logger.info(
-                    "Session %s event count stable at %d after stream error; "
-                    "treating campaign as complete server-side rather than retrying.",
-                    session_id, count_after,
-                )
-                return count_after
-
             logger.info(
-                "Session %s still growing (%d -> %d) after stream error; "
-                "re-invoking to continue the drive.",
-                session_id, count_before, count_after,
+                "Session %s not yet terminal (%d events); waiting %.1fs before retry with continuation prompt.",
+                session_id, total_events, DRAIN_RETRY_BACKOFF_SECONDS,
             )
-            next_message = (
-                "Continue the campaign from where you left off. Do not repeat "
-                "any specialist calls that already returned a result above -- "
-                "pick up with the next step."
-            )
+            await asyncio.sleep(DRAIN_RETRY_BACKOFF_SECONDS)
+            next_message = CONTINUATION_PROMPT
 
-    raise last_error or RuntimeError(f"Drain failed for session {session_id} with no captured error")
+    raise last_error or RuntimeError(f"Drain failed for session {session_id} without reaching terminal state")
 
 
 async def handle_drive(request: Request) -> JSONResponse:

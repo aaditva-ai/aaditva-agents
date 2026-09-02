@@ -7,6 +7,7 @@ import type {
   AgentHealthReport,
   BenchmarkBrief,
   JudgeEvaluationResult,
+  QuotaStatusResponse,
 } from "./types";
 import { selectTranscript, isTerminal } from "./selectTranscript";
 
@@ -18,7 +19,7 @@ import { selectTranscript, isTerminal } from "./selectTranscript";
  * per-component logic.
  */
 
-async function createCampaign(prompt: string): Promise<{ sessionId: string }> {
+export async function createCampaign(prompt: string): Promise<{ sessionId: string }> {
   return authedFetch("/campaigns", {
     method: "POST",
     body: JSON.stringify({ prompt }),
@@ -212,5 +213,15 @@ export function useCampaignEvaluation(sessionId: string | undefined) {
     },
     enabled: Boolean(sessionId),
     staleTime: 60_000,
+  });
+}
+
+async function prepareImageQuotas(): Promise<QuotaStatusResponse> {
+  return authedFetch("/evals/prepare-quotas", { method: "POST" }) as Promise<QuotaStatusResponse>;
+}
+
+export function usePrepareImageQuotas() {
+  return useMutation<QuotaStatusResponse, ApiError, void>({
+    mutationFn: prepareImageQuotas,
   });
 }

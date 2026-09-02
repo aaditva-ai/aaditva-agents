@@ -1,0 +1,11 @@
+{
+  "model": "deepseek-r1-distill-qwen-7b",
+  "status": "SUCCESS",
+  "time": 26.58653211593628,
+  "start_ram": 66.6,
+  "end_ram": 66.6,
+  "prompt_tokens": 123,
+  "completion_tokens": 256,
+  "reasoning_tokens": 254,
+  "preview": ""
+}

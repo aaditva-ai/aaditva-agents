@@ -54,6 +54,41 @@ def test_heuristic_evaluate_with_normalized_steps():
         assert c["passed"] is True
 
 
+def test_format_transcript_for_judge_with_project_manager_and_notion_deliverables():
+    steps = [
+        {"id": "1:0", "author": "user", "kind": "text", "text": "Create athletic shoe launch campaign"},
+        {"id": "2:0", "author": "creative_director", "kind": "tool_call", "toolName": "brand_strategist"},
+        {"id": "2:1", "author": "creative_director", "kind": "tool_result", "toolName": "brand_strategist", "text": "Target: Trail runners"},
+        {"id": "3:0", "author": "creative_director", "kind": "tool_call", "toolName": "copywriter"},
+        {"id": "3:1", "author": "creative_director", "kind": "tool_result", "toolName": "copywriter", "text": "Hook: Conquer Every Ridge"},
+        {"id": "4:0", "author": "creative_director", "kind": "image", "imageUrl": "https://storage.googleapis.com/shoe.png", "text": "Shoe render"},
+        {"id": "5:0", "author": "creative_director", "kind": "tool_call", "toolName": "critic"},
+        {"id": "5:1", "author": "creative_director", "kind": "tool_result", "toolName": "critic", "text": "Status: APPROVED"},
+        {"id": "6:0", "author": "creative_director", "kind": "tool_call", "toolName": "project_manager"},
+        {
+            "id": "6:1",
+            "author": "creative_director",
+            "kind": "tool_result",
+            "toolName": "project_manager",
+            "text": "**Project Timeline:**\nPhase 1: Strategy | Sept 1 -> Sept 5\n**Notion Status:** Project page created (id: 12345), 8 tasks linked to Notion database.",
+        },
+        {"id": "7:0", "author": "creative_director", "kind": "text", "text": "Campaign Presentation Delivered to User!"},
+    ]
+    prompt = "Create athletic shoe launch campaign"
+    transcript = judge_service._format_transcript_for_judge(steps, prompt)
+
+    assert "[TOOL CALL - project_manager]" in transcript
+    assert "[TOOL RESPONSE - project_manager]: **Project Timeline:**" in transcript
+    assert "Notion Status" in transcript
+    assert "Project page created (id: 12345)" in transcript
+
+    eval_result = judge_service._heuristic_evaluate(steps, prompt)
+    assert eval_result["overallScore"] == 100.0
+    c5 = next(c for c in eval_result["criteria"] if c["id"] == 5)
+    assert c5["score"] == 100
+    assert c5["passed"] is True
+
+
 @pytest.mark.asyncio
 async def test_evaluate_campaign_transcript_persists_and_returns(monkeypatch):
     session_id = "test-judge-session"

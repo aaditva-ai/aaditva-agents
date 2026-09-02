@@ -95,91 +95,165 @@ def test_health_ok():
 
 
 class _FakeAgentEngine:
-    """Simulates async_stream_query: fails once mid-stream, then behaves
-    according to `post_error_events` on the next call so tests can drive
-    both branches of _drain's post-error decision.
-    """
+    """Simulates async_stream_query: yields chunks and optionally raises errors."""
 
-    def __init__(self, events_before_error: int, raise_error: bool = True):
+    def __init__(self, events_before_error: int = 0, raise_error: bool = False, error_on_call: int = 1):
         self.events_before_error = events_before_error
         self.raise_error = raise_error
+        self.error_on_call = error_on_call
         self.calls = 0
+        self.messages = []
 
     async def async_stream_query(self, user_id, session_id, message):
         self.calls += 1
+        self.messages.append(message)
         for _ in range(self.events_before_error):
-            yield {"author": "x"}
-        if self.raise_error and self.calls == 1:
+            yield {"author": "creative_director"}
+        if self.raise_error and self.calls == self.error_on_call:
             raise RuntimeError("503 UNAVAILABLE")
 
 
 class _FakeSessionsEventsList:
-    """Simulates client.agent_engines.sessions.events.list(name=...) as a
-    sequence of counts returned on successive calls, matching how _drain
-    polls the session twice around its sleep to detect growth vs. stability.
-    """
+    """Returns predetermined event lists on successive calls."""
 
-    def __init__(self, counts: list[int]):
-        self._counts = list(counts)
+    def __init__(self, event_batches: list[list]):
+        self._batches = list(event_batches)
 
     def list(self, name):
-        n = self._counts.pop(0) if self._counts else self._counts_last
-        self._counts_last = n
-        return [object()] * n
+        if self._batches:
+            return self._batches.pop(0)
+        return []
 
 
 class _FakeClient:
-    def __init__(self, counts: list[int]):
+    def __init__(self, event_batches: list[list]):
         self.agent_engines = type("_", (), {})()
         self.agent_engines.sessions = type("_", (), {})()
-        self.agent_engines.sessions.events = _FakeSessionsEventsList(counts)
+        self.agent_engines.sessions.events = _FakeSessionsEventsList(event_batches)
+
+
+def test_is_campaign_terminal():
+    assert not main._is_campaign_terminal([])
+
+    non_terminal_events = [
+        {"content": {"parts": [{"text": "Starting market research..."}]}},
+        {"content": {"parts": [{"function_call": {"name": "brand_strategist"}}]}},
+        {"content": {"parts": [{"function_response": {"name": "brand_strategist", "response": {"result": "research"}}}]}},
+        {"content": {"parts": [{"function_call": {"name": "copywriter"}}]}},
+        {"content": {"parts": [{"function_response": {"name": "copywriter", "response": {"result": "posts"}}}]}},
+    ]
+    assert not main._is_campaign_terminal(non_terminal_events)
+
+    terminal_pm_call = [
+        {"content": {"parts": [{"function_call": {"name": "project_manager"}}]}}
+    ]
+    assert main._is_campaign_terminal(terminal_pm_call)
+
+    terminal_pm_resp = [
+        {"content": {"parts": [{"function_response": {"name": "project_manager", "response": {"result": "Done"}}}]}}
+    ]
+    assert main._is_campaign_terminal(terminal_pm_resp)
+
+    terminal_timeline_text = [
+        {"content": {"parts": [{"text": "**Project Timeline:**\nPhase 1: Strategy\n**Notion Status:** Created 5 tasks"}]}}
+    ]
+    assert main._is_campaign_terminal(terminal_timeline_text)
 
 
 @pytest.mark.asyncio
-async def test_drain_treats_stable_session_as_complete_after_error(monkeypatch):
-    monkeypatch.setattr(main, "asyncio", main.asyncio)  # keep real asyncio.sleep patched below
+async def test_drain_completes_when_terminal_on_first_stream(monkeypatch):
     monkeypatch.setattr(main.asyncio, "sleep", AsyncMock(return_value=None))
 
-    agent_engine = _FakeAgentEngine(events_before_error=0, raise_error=True)
-    client = _FakeClient(counts=[12, 12])  # stable across the two post-error reads
+    agent_engine = _FakeAgentEngine(events_before_error=3, raise_error=False)
+    terminal_events = [
+        {"content": {"parts": [{"function_response": {"name": "project_manager", "response": {"result": "timeline"}}}]}}
+    ] * 10
+    client = _FakeClient(event_batches=[terminal_events])
 
     result = await main._drain(
-        client, agent_engine, "session-name", "user-1", "session-1", "brief"
+        client, agent_engine, "session-name", "user-1", "session-1", "Create campaign"
+    )
+    assert result == 10
+    assert agent_engine.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_drain_recovers_when_session_already_terminal_after_error(monkeypatch):
+    monkeypatch.setattr(main.asyncio, "sleep", AsyncMock(return_value=None))
+
+    agent_engine = _FakeAgentEngine(events_before_error=0, raise_error=True, error_on_call=1)
+    terminal_events = [
+        {"content": {"parts": [{"function_response": {"name": "project_manager", "response": {"result": "timeline"}}}]}}
+    ] * 12
+    client = _FakeClient(event_batches=[terminal_events])
+
+    result = await main._drain(
+        client, agent_engine, "session-name", "user-1", "session-1", "Create campaign"
     )
     assert result == 12
-    assert agent_engine.calls == 1  # never retried the stream once treated as complete
+    assert agent_engine.calls == 1  # Terminal verified on server side; no second invocation needed
 
 
 @pytest.mark.asyncio
-async def test_drain_retries_when_session_still_growing(monkeypatch):
+async def test_drain_re_invokes_continuation_when_mid_stream_error_and_not_terminal(monkeypatch):
     monkeypatch.setattr(main.asyncio, "sleep", AsyncMock(return_value=None))
 
-    agent_engine = _FakeAgentEngine(events_before_error=0, raise_error=True)
-    # First error triggers a growth check (5 -> 8, growing) then the retried
-    # stream call succeeds without raising (calls == 2 skips the raise).
-    client = _FakeClient(counts=[5, 8])
+    agent_engine = _FakeAgentEngine(events_before_error=0, raise_error=True, error_on_call=1)
+    non_terminal_events = [
+        {"content": {"parts": [{"function_response": {"name": "designer", "response": {"result": "images"}}}]}}
+    ] * 5
+    terminal_events = [
+        {"content": {"parts": [{"function_response": {"name": "project_manager", "response": {"result": "timeline"}}}]}}
+    ] * 14
+    # First call: incomplete events after error; Second call (stream finishes): terminal events
+    client = _FakeClient(event_batches=[non_terminal_events, terminal_events])
 
     result = await main._drain(
-        client, agent_engine, "session-name", "user-1", "session-1", "brief"
+        client, agent_engine, "session-name", "user-1", "session-1", "Create campaign"
     )
-    assert result == 0  # second (successful) call yields zero events in this fake
+    assert result == 14
     assert agent_engine.calls == 2
+    assert agent_engine.messages[1] == main.CONTINUATION_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_drain_re_invokes_continuation_when_clean_stream_ends_before_terminal(monkeypatch):
+    monkeypatch.setattr(main.asyncio, "sleep", AsyncMock(return_value=None))
+
+    agent_engine = _FakeAgentEngine(events_before_error=2, raise_error=False)
+    non_terminal_events = [
+        {"content": {"parts": [{"function_response": {"name": "copywriter", "response": {"result": "copy"}}}]}}
+    ] * 4
+    terminal_events = [
+        {"content": {"parts": [{"function_response": {"name": "project_manager", "response": {"result": "timeline"}}}]}}
+    ] * 9
+    client = _FakeClient(event_batches=[non_terminal_events, terminal_events])
+
+    result = await main._drain(
+        client, agent_engine, "session-name", "user-1", "session-1", "Create campaign"
+    )
+    assert result == 9
+    assert agent_engine.calls == 2
+    assert agent_engine.messages[1] == main.CONTINUATION_PROMPT
 
 
 @pytest.mark.asyncio
 async def test_drain_raises_after_exhausting_retries(monkeypatch):
     monkeypatch.setattr(main.asyncio, "sleep", AsyncMock(return_value=None))
-    monkeypatch.setattr(main, "MAX_DRAIN_RETRIES", 1)
+    monkeypatch.setattr(main, "MAX_DRAIN_RETRIES", 2)
 
-    agent_engine = _FakeAgentEngine(events_before_error=0, raise_error=True)
+    agent_engine = _FakeAgentEngine(events_before_error=0, raise_error=True, error_on_call=1)
     agent_engine.async_stream_query = lambda user_id, session_id, message: _always_raise()
-    # Always report growth so _drain keeps retrying until it exhausts MAX_DRAIN_RETRIES.
-    client = _FakeClient(counts=[1, 2, 3, 4, 5, 6])
+    non_terminal_events = [
+        {"content": {"parts": [{"function_response": {"name": "designer", "response": {"result": "img"}}}]}}
+    ] * 3
+    client = _FakeClient(event_batches=[non_terminal_events, non_terminal_events, non_terminal_events, non_terminal_events])
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError) as exc_info:
         await main._drain(client, agent_engine, "session-name", "user-1", "session-1", "brief")
+    assert "503 UNAVAILABLE" in str(exc_info.value)
 
 
 async def _always_raise():
     raise RuntimeError("503 UNAVAILABLE")
-    yield  # pragma: no cover -- makes this an async generator
+    yield

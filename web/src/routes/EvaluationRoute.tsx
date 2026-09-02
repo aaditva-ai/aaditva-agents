@@ -52,7 +52,7 @@ export function EvaluationRoute() {
             </span>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Live infrastructure probing, canonical benchmark runner (Parallel &amp; Sequential), and LLM-as-a-Judge rubric auditor.
+            Live infrastructure probing, canonical benchmark runner, and LLM-as-a-Judge rubric auditor.
           </p>
         </div>
 

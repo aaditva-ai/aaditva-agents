@@ -149,3 +149,9 @@ async def test_check_admission_does_not_apply_cap_to_non_anonymous_user(fake_db,
 
     result = await cl.check_admission("real-user-1", is_anonymous=False)
     assert result["allowed"] is True
+
+
+async def test_elevate_user_allowance(fake_db):
+    await cl.elevate_user_allowance("user-elevate", max_concurrent=10, tokens=20)
+    max_c = await cl.get_max_concurrent_campaigns("user-elevate")
+    assert max_c == 10

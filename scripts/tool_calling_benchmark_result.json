@@ -1,0 +1,22 @@
+{
+  "model": "qwen2.5-0.5b-instruct",
+  "status": "SUCCESS",
+  "has_tool_call": true,
+  "tool_calls": [
+    {
+      "type": "function",
+      "id": "lboYimc85Y29oF7uiPYjdBOMB5Rv8LGa",
+      "function": {
+        "name": "file_read",
+        "arguments": "{\"path\":\"web/src/App.tsx\"}"
+      }
+    }
+  ],
+  "content_preview": "",
+  "time": 4.56985068321228,
+  "start_ram": 66.0,
+  "end_ram": 49.2,
+  "prompt_tokens": 335,
+  "completion_tokens": 24,
+  "reasoning_tokens": 0
+}

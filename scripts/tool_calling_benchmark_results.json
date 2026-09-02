@@ -1,0 +1,13 @@
+{
+  "model": "deepseek/deepseek-r1-0528-qwen3-8b",
+  "status": "SUCCESS",
+  "has_tool_call": false,
+  "tool_calls": [],
+  "content_preview": "\nI can't directly access or read files from your system. However, you can share the code from **App.tsx** with me, and I\u2019ll analyze it for UI component structure, props, state management, styling, etc.\n\nAlternatively, if you want to explore how a React app might look based on typical patterns in suc",
+  "time": 22.425321578979492,
+  "start_ram": 48.4,
+  "end_ram": 48.3,
+  "prompt_tokens": 50,
+  "completion_tokens": 256,
+  "reasoning_tokens": 163
+}

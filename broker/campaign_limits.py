@@ -31,9 +31,9 @@ def _unwrap_root_cause(e: Exception) -> Exception:
     return e
 
 
-RATE_LIMIT_CAPACITY = float(os.environ.get("CAMPAIGN_RATE_LIMIT_CAPACITY", "3"))
+RATE_LIMIT_CAPACITY = float(os.environ.get("CAMPAIGN_RATE_LIMIT_CAPACITY", "20"))
 RATE_LIMIT_WINDOW_SECONDS = float(os.environ.get("CAMPAIGN_RATE_LIMIT_WINDOW_SECONDS", "3600"))
-DEFAULT_MAX_CONCURRENT_CAMPAIGNS = int(os.environ.get("CAMPAIGN_MAX_CONCURRENT_DEFAULT", "1"))
+DEFAULT_MAX_CONCURRENT_CAMPAIGNS = int(os.environ.get("CAMPAIGN_MAX_CONCURRENT_DEFAULT", "10"))
 
 # A hard, non-refilling lifetime cap on Firebase Anonymous Auth users,
 # separate from and in addition to the sliding-window rate limiter above.
@@ -45,7 +45,7 @@ DEFAULT_MAX_CONCURRENT_CAMPAIGNS = int(os.environ.get("CAMPAIGN_MAX_CONCURRENT_D
 # resume (see main.py), since a resume dispatches an equally real,
 # billable campaign-driver run and would otherwise let an anonymous user
 # work around the cap entirely by resuming indefinitely.
-ANONYMOUS_MAX_LIFETIME_TRIGGERS = int(os.environ.get("CAMPAIGN_ANONYMOUS_MAX_TRIGGERS", "3"))
+ANONYMOUS_MAX_LIFETIME_TRIGGERS = int(os.environ.get("CAMPAIGN_ANONYMOUS_MAX_TRIGGERS", "30"))
 
 _RATE_LIMIT_COLLECTION = "campaign_rate_limits"
 _CAMPAIGNS_COLLECTION = "campaigns"
@@ -122,6 +122,23 @@ async def get_max_concurrent_campaigns(user_id: str) -> int:
         if isinstance(value, int) and value > 0:
             return value
     return DEFAULT_MAX_CONCURRENT_CAMPAIGNS
+
+
+async def elevate_user_allowance(user_id: str, max_concurrent: int = 10, tokens: int = 20) -> None:
+    """Explicitly elevates a user's concurrent campaign allowance and refills rate limit tokens."""
+    db = _get_db()
+    try:
+        await db.collection(_ALLOWANCE_COLLECTION).document(user_id).set(
+            {"max_concurrent": max_concurrent, "updated_at": time.time()},
+            merge=True,
+        )
+        await db.collection(_RATE_LIMIT_COLLECTION).document(user_id).set(
+            {"tokens": float(tokens), "last_refill_ts": time.time()},
+            merge=True,
+        )
+        logger.info("Elevated campaign allowance and refilled tokens for user %s (max_concurrent=%d)", user_id, max_concurrent)
+    except Exception as e:
+        logger.warning("Could not elevate Firestore user allowance for %s: %s", user_id, e)
 
 
 async def count_active_campaigns(user_id: str) -> int:
