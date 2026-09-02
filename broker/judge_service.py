@@ -5,6 +5,7 @@ Caches evaluation scorecards in Firestore to prevent redundant LLM invocations a
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
 import json
 import logging
@@ -126,14 +127,21 @@ def _format_transcript_for_judge(steps: list[dict], prompt: str) -> str:
         step_kind = s.get("kind") or s.get("type", "unknown")
         author = s.get("author") or s.get("title") or "system"
         if step_kind in ("text", "message"):
-            lines.append(f"[{author}]: {s.get('text', '')}")
+            text = str(s.get("text", ""))
+            if len(text) > 4000:
+                text = text[:4000] + "... [truncated]"
+            lines.append(f"[{author}]: {text}")
         elif step_kind == "tool_call":
             tool_name = s.get("toolName") or s.get("tool") or "tool"
-            args = s.get("args") or s.get("text", "")
+            args = str(s.get("args") or s.get("text", ""))
+            if len(args) > 2000:
+                args = args[:2000] + "... [truncated]"
             lines.append(f"[TOOL CALL - {tool_name}]: {args}")
         elif step_kind in ("tool_result", "tool_response"):
             tool_name = s.get("toolName") or s.get("tool") or "tool"
-            result = s.get("text") or s.get("result", "")
+            result = str(s.get("text") or s.get("result", ""))
+            if len(result) > 4000:
+                result = result[:4000] + "... [truncated]"
             lines.append(f"[TOOL RESPONSE - {tool_name}]: {result}")
         elif step_kind == "image":
             img_url = s.get("imageUrl") or s.get("url", "")
@@ -258,6 +266,36 @@ def _heuristic_evaluate(steps: list[dict], prompt: str) -> dict[str, Any]:
     }
 
 
+def _run_gemini_judge(
+    project_id: str | None, location: str, model_name: str, prompt_text: str
+) -> dict[str, Any] | None:
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(vertexai=True, project=project_id, location=location)
+    response = client.models.generate_content(
+        model=model_name,
+        contents=[
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(text=prompt_text)
+                ],
+            )
+        ],
+        config=types.GenerateContentConfig(
+            temperature=0.1,
+            response_mime_type="application/json",
+        ),
+    )
+
+    if response and response.text:
+        parsed = json.loads(response.text)
+        if "criteria" in parsed and "overallScore" in parsed:
+            return parsed
+    return None
+
+
 async def evaluate_campaign_transcript(session_id: str, prompt: str, steps: list[dict]) -> dict[str, Any]:
     """Runs LLM-as-a-Judge using Vertex AI Gemini with heuristic fallback."""
     project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT_ID")
@@ -269,33 +307,14 @@ async def evaluate_campaign_transcript(session_id: str, prompt: str, steps: list
     model_name = os.environ.get("JUDGE_MODEL", "gemini-2.5-flash")
 
     formatted_transcript = _format_transcript_for_judge(steps, prompt)
+    full_prompt = f"{JUDGE_SYSTEM_PROMPT}\n\n{formatted_transcript}"
 
     result_data = None
     try:
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(vertexai=True, project=project_id, location=location)
-        response = client.models.generate_content(
-            model=model_name,
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[
-                        types.Part.from_text(text=f"{JUDGE_SYSTEM_PROMPT}\n\n{formatted_transcript}")
-                    ],
-                )
-            ],
-            config=types.GenerateContentConfig(
-                temperature=0.1,
-                response_mime_type="application/json",
-            ),
+        result_data = await asyncio.wait_for(
+            asyncio.to_thread(_run_gemini_judge, project_id, location, model_name, full_prompt),
+            timeout=180.0,
         )
-
-        if response and response.text:
-            parsed = json.loads(response.text)
-            if "criteria" in parsed and "overallScore" in parsed:
-                result_data = parsed
     except Exception as e:
         logger.warning("Vertex AI Gemini judge failed or unavailable (%s); using deterministic rubric auditor", e)
 

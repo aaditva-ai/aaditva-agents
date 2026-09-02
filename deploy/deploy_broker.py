@@ -230,7 +230,7 @@ async def deploy() -> None:
         f"--env-vars-file={env_vars_file}",
         "--memory=512Mi",
         "--cpu=1",
-        "--timeout=60",
+        "--timeout=300",
         "--max-instances=10",
         "--min-instances=0",
         "--quiet",
