@@ -1,6 +1,7 @@
 import { useParams, Link } from "react-router-dom";
 import { useCampaignEvents, useResumeCampaign } from "../api/queries";
 import { TranscriptView } from "../components/TranscriptView";
+import { isTerminal } from "../api/selectTranscript";
 
 const RESUMABLE_STATUSES = new Set(["failed", "stalled"]);
 
@@ -17,6 +18,8 @@ export function CampaignRoute() {
   const resume = useResumeCampaign(sessionId);
 
   if (!sessionId) return null;
+
+  const isPolling = !isTerminal(query.data?.status ?? "starting");
 
   return (
     <div className="flex flex-col w-full">
@@ -47,12 +50,19 @@ export function CampaignRoute() {
       )}
 
       {/* Empty state for new campaigns */}
-      {!query.data && !query.isLoading && query.isSuccess && (
+      {query.data && query.data.groups.length === 0 && !query.isLoading && (
         <section className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground bg-muted/20 rounded-xl border border-border">
-          <svg className="w-12 h-12 text-muted-foreground/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 6v6l4 2" />
-          </svg>
+          {isPolling ? (
+            <div
+              data-testid="polling-loading-indicator"
+              className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"
+            />
+          ) : (
+            <svg className="w-12 h-12 text-muted-foreground/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 6v6l4 2" />
+            </svg>
+          )}
           <p className="text-center text-sm font-medium">Campaign started — waiting for first event…</p>
         </section>
       )}
