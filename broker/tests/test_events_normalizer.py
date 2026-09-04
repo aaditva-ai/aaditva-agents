@@ -107,6 +107,34 @@ def test_get_image_links_response_refreshes_signed_url_when_gcs_uri_present(monk
     assert steps[0]["text"] == "Post 1"
 
 
+def test_get_image_links_response_refreshes_signed_url_from_expired_http_url(monkeypatch):
+    monkeypatch.setattr(
+        "events_normalizer.get_signed_url",
+        lambda uri: f"https://fresh-signed.example.com/{uri.replace('gs://', '')}?fresh=true",
+    )
+    events = [_event("4-legacy", "creative_director", [
+        {"function_response": {
+            "name": "get_image_links",
+            "response": {
+                "status": "success",
+                "signed": True,
+                "links": [
+                    {
+                        "concept": "hydration",
+                        "title": "Legacy Post 1",
+                        "url": "https://storage.googleapis.com/aaditva-campaign-images/campaign-images/old1.png?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Date=20260903T111557Z&X-Goog-Expires=3600",
+                    },
+                ],
+            },
+        }},
+    ])]
+    steps = normalize_events(events)
+    assert len(steps) == 1
+    assert steps[0]["kind"] == "image"
+    assert steps[0]["imageUrl"] == "https://fresh-signed.example.com/aaditva-campaign-images/campaign-images/old1.png?fresh=true"
+    assert steps[0]["text"] == "Legacy Post 1"
+
+
 def test_display_image_function_call_becomes_image_step_with_signed_url(monkeypatch):
     monkeypatch.setattr(
         "events_normalizer.get_signed_url",

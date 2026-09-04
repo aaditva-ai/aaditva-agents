@@ -38,20 +38,36 @@ from typing import Any
 _SIGNED_URL_CACHE: dict[str, tuple[str, float]] = {}
 
 
+def extract_gcs_uri(uri_or_url: str | None) -> str | None:
+    """Extract a canonical gs:// URI from either a gs:// URI or a storage.googleapis.com URL."""
+    if not uri_or_url or not isinstance(uri_or_url, str):
+        return None
+    if uri_or_url.startswith("gs://"):
+        return uri_or_url
+    if uri_or_url.startswith("https://storage.googleapis.com/"):
+        without_scheme = uri_or_url[len("https://storage.googleapis.com/"):]
+        path = without_scheme.split("?")[0]
+        if "/" in path:
+            return f"gs://{path}"
+    return None
+
+
 def get_signed_url(gcs_uri: str) -> str:
-    """Generate a signed GET URL for a gs:// URI, with in-memory TTL caching."""
+    """Generate a signed GET URL for a gs:// URI or storage.googleapis.com URL, with in-memory TTL caching."""
     if not gcs_uri or not isinstance(gcs_uri, str):
         return gcs_uri or ""
-    if not gcs_uri.startswith("gs://"):
+
+    canonical_uri = extract_gcs_uri(gcs_uri) or gcs_uri
+    if not canonical_uri.startswith("gs://"):
         return gcs_uri
 
     now = time.time()
-    if gcs_uri in _SIGNED_URL_CACHE:
-        cached_url, expires_at = _SIGNED_URL_CACHE[gcs_uri]
+    if canonical_uri in _SIGNED_URL_CACHE:
+        cached_url, expires_at = _SIGNED_URL_CACHE[canonical_uri]
         if now < expires_at:
             return cached_url
 
-    without_prefix = gcs_uri[len("gs://"):]
+    without_prefix = canonical_uri[len("gs://"):]
     if "/" not in without_prefix:
         return gcs_uri
     bucket_name, blob_path = without_prefix.split("/", 1)
@@ -84,7 +100,14 @@ def get_signed_url(gcs_uri: str) -> str:
             except Exception:
                 pass
 
+        candidate_emails = []
         if sa_email and sa_email != "default":
+            candidate_emails.append(sa_email)
+        runtime_sa = getattr(credentials, "service_account_email", None)
+        if runtime_sa and runtime_sa not in candidate_emails and runtime_sa != "default":
+            candidate_emails.append(runtime_sa)
+
+        for email in candidate_emails:
             try:
                 from google.auth import iam as google_auth_iam
                 from google.auth.transport import requests as google_auth_requests
@@ -96,11 +119,11 @@ def get_signed_url(gcs_uri: str) -> str:
                 signer = google_auth_iam.Signer(
                     request=request,
                     credentials=credentials,
-                    service_account_email=sa_email,
+                    service_account_email=email,
                 )
                 sign_credentials = sa_module.Credentials(
                     signer=signer,
-                    service_account_email=sa_email,
+                    service_account_email=email,
                     token_uri="https://oauth2.googleapis.com/token",
                 )
                 url = blob.generate_signed_url(
@@ -110,10 +133,10 @@ def get_signed_url(gcs_uri: str) -> str:
                     credentials=sign_credentials,
                 )
                 # Cache for up to 6 days
-                _SIGNED_URL_CACHE[gcs_uri] = (url, now + 86400 * 6)
+                _SIGNED_URL_CACHE[canonical_uri] = (url, now + 86400 * 6)
                 return url
             except Exception:
-                pass
+                continue
 
         try:
             url = blob.generate_signed_url(
@@ -121,7 +144,7 @@ def get_signed_url(gcs_uri: str) -> str:
                 expiration=datetime.timedelta(days=7),
                 method="GET",
             )
-            _SIGNED_URL_CACHE[gcs_uri] = (url, now + 86400 * 6)
+            _SIGNED_URL_CACHE[canonical_uri] = (url, now + 86400 * 6)
             return url
         except Exception:
             return fallback_url
@@ -205,7 +228,7 @@ def _normalize_get_image_links_response(response: Any) -> list[dict]:
     images = []
     for link in links:
         url = link.get("url")
-        gcs_uri = link.get("gcs_uri")
+        gcs_uri = link.get("gcs_uri") or extract_gcs_uri(url)
         # Regenerate signed URL from gcs_uri when available so historical events
         # don't suffer from expired signatures after 1 hour (HTTP 400 Bad Request).
         if gcs_uri:

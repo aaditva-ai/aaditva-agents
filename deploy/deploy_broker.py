@@ -112,6 +112,17 @@ async def grant_iam(project_id: str, broker_sa: str, invoker_sa: str) -> None:
     ])
     print(f"   {'✓' if rc_tok == 0 else 'ℹ️ '} roles/iam.serviceAccountTokenCreator on {broker_sa}" + ("" if rc_tok == 0 else f": {err_tok.strip()}"))
 
+    signing_sa = os.getenv("SIGNING_SERVICE_ACCOUNT")
+    if signing_sa and signing_sa != broker_sa:
+        rc_sig, _, err_sig = await run_command_async([
+            GCLOUD_CMD, "iam", "service-accounts", "add-iam-policy-binding", signing_sa,
+            f"--member=serviceAccount:{broker_sa}",
+            "--role=roles/iam.serviceAccountTokenCreator",
+            f"--project={project_id}",
+            "--quiet",
+        ])
+        print(f"   {'✓' if rc_sig == 0 else 'ℹ️ '} roles/iam.serviceAccountTokenCreator on {signing_sa} -> {broker_sa}" + ("" if rc_sig == 0 else f": {err_sig.strip()}"))
+
     bucket = os.getenv("GCS_IMAGES_BUCKET")
     if bucket:
         rc_gcs, _, err_gcs = await run_command_async([
