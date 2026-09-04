@@ -31,20 +31,25 @@ from __future__ import annotations
 
 import datetime
 import os
+import time
 import urllib.request
 from typing import Any
 
-_SIGNED_URL_CACHE: dict[str, str] = {}
+_SIGNED_URL_CACHE: dict[str, tuple[str, float]] = {}
 
 
 def get_signed_url(gcs_uri: str) -> str:
-    """Generate a signed GET URL for a gs:// URI, with in-memory caching."""
+    """Generate a signed GET URL for a gs:// URI, with in-memory TTL caching."""
     if not gcs_uri or not isinstance(gcs_uri, str):
         return gcs_uri or ""
     if not gcs_uri.startswith("gs://"):
         return gcs_uri
+
+    now = time.time()
     if gcs_uri in _SIGNED_URL_CACHE:
-        return _SIGNED_URL_CACHE[gcs_uri]
+        cached_url, expires_at = _SIGNED_URL_CACHE[gcs_uri]
+        if now < expires_at:
+            return cached_url
 
     without_prefix = gcs_uri[len("gs://"):]
     if "/" not in without_prefix:
@@ -67,15 +72,17 @@ def get_signed_url(gcs_uri: str) -> str:
             credentials, "service_account_email", None
         )
 
-        if sa_email == "default":
+        if sa_email == "default" or (sa_email and not sa_email.endswith(".iam.gserviceaccount.com") and not sa_email.endswith(".gserviceaccount.com")):
             try:
                 req = urllib.request.Request(
                     "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email",
                     headers={"Metadata-Flavor": "Google"},
                 )
-                sa_email = urllib.request.urlopen(req, timeout=1).read().decode().strip()
+                fetched_email = urllib.request.urlopen(req, timeout=1).read().decode().strip()
+                if fetched_email:
+                    sa_email = fetched_email
             except Exception:
-                sa_email = None
+                pass
 
         if sa_email and sa_email != "default":
             try:
@@ -98,11 +105,12 @@ def get_signed_url(gcs_uri: str) -> str:
                 )
                 url = blob.generate_signed_url(
                     version="v4",
-                    expiration=datetime.timedelta(hours=1),
+                    expiration=datetime.timedelta(days=7),
                     method="GET",
                     credentials=sign_credentials,
                 )
-                _SIGNED_URL_CACHE[gcs_uri] = url
+                # Cache for up to 6 days
+                _SIGNED_URL_CACHE[gcs_uri] = (url, now + 86400 * 6)
                 return url
             except Exception:
                 pass
@@ -110,13 +118,12 @@ def get_signed_url(gcs_uri: str) -> str:
         try:
             url = blob.generate_signed_url(
                 version="v4",
-                expiration=datetime.timedelta(hours=1),
+                expiration=datetime.timedelta(days=7),
                 method="GET",
             )
-            _SIGNED_URL_CACHE[gcs_uri] = url
+            _SIGNED_URL_CACHE[gcs_uri] = (url, now + 86400 * 6)
             return url
         except Exception:
-            _SIGNED_URL_CACHE[gcs_uri] = fallback_url
             return fallback_url
     except Exception:
         return fallback_url
@@ -198,6 +205,13 @@ def _normalize_get_image_links_response(response: Any) -> list[dict]:
     images = []
     for link in links:
         url = link.get("url")
+        gcs_uri = link.get("gcs_uri")
+        # Regenerate signed URL from gcs_uri when available so historical events
+        # don't suffer from expired signatures after 1 hour (HTTP 400 Bad Request).
+        if gcs_uri:
+            fresh_url = get_signed_url(gcs_uri)
+            if fresh_url and ("?" in fresh_url or not url):
+                url = fresh_url
         if not url:
             continue
         images.append({"url": url, "title": link.get("title") or link.get("concept")})

@@ -78,6 +78,35 @@ def test_get_image_links_response_becomes_image_steps():
     assert steps[1]["imageUrl"] == "https://storage.googleapis.com/b.png?sig=2"
 
 
+def test_get_image_links_response_refreshes_signed_url_when_gcs_uri_present(monkeypatch):
+    monkeypatch.setattr(
+        "events_normalizer.get_signed_url",
+        lambda uri: f"https://fresh-signed.example.com/{uri.replace('gs://', '')}?fresh=true",
+    )
+    events = [_event("4-fresh", "creative_director", [
+        {"function_response": {
+            "name": "get_image_links",
+            "response": {
+                "status": "success",
+                "signed": True,
+                "links": [
+                    {
+                        "concept": "hydration",
+                        "title": "Post 1",
+                        "gcs_uri": "gs://bucket/assets/old1.png",
+                        "url": "https://storage.googleapis.com/bucket/assets/old1.png?expired=sig",
+                    },
+                ],
+            },
+        }},
+    ])]
+    steps = normalize_events(events)
+    assert len(steps) == 1
+    assert steps[0]["kind"] == "image"
+    assert steps[0]["imageUrl"] == "https://fresh-signed.example.com/bucket/assets/old1.png?fresh=true"
+    assert steps[0]["text"] == "Post 1"
+
+
 def test_display_image_function_call_becomes_image_step_with_signed_url(monkeypatch):
     monkeypatch.setattr(
         "events_normalizer.get_signed_url",
@@ -112,7 +141,6 @@ def test_get_signed_url_caching_and_fallback(monkeypatch):
     uri = "gs://test-bucket/sample.png"
     url = get_signed_url(uri)
     assert url.startswith("https://storage.googleapis.com/test-bucket/sample.png")
-    assert _SIGNED_URL_CACHE[uri] == url
 
     # Cached hit returns the exact same URL without re-computing
     assert get_signed_url(uri) == url

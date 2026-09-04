@@ -91,7 +91,7 @@ def get_image_links(gcs_uris: list[str], titles: Optional[list[str]] = None) -> 
             if use_signed:
                 url = blob.generate_signed_url(
                     version="v4",
-                    expiration=timedelta(hours=1),
+                    expiration=timedelta(days=7),
                     method="GET",
                     credentials=sign_credentials,
                 )
