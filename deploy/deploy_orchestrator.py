@@ -49,12 +49,14 @@ sys.path.insert(0, str(project_root))
 # Load environment variables
 load_dotenv()
 
+GCLOUD_CMD = "gcloud.cmd" if os.name == "nt" else "gcloud"
+
 # Configuration
 # CLOUD_RUN_REGION / GCP_REGION: real GCP region for Agent Runtime and Cloud Run.
 # GOOGLE_CLOUD_LOCATION may be "global" (for preview model routing) — do NOT use it here.
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("PROJECT_ID", "")
 PROJECT_NUMBER = os.getenv("GOOGLE_CLOUD_PROJECT_NUMBER") or subprocess.check_output(
-    ["gcloud", "projects", "describe", PROJECT_ID, "--format=value(projectNumber)"],
+    [GCLOUD_CMD, "projects", "describe", PROJECT_ID, "--format=value(projectNumber)"],
     text=True,
 ).strip()
 LOCATION = (
