@@ -6,6 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import campaign_store
 import judge_service
 from events_normalizer import dedupe_by_id, normalize_events
 
@@ -105,3 +106,74 @@ async def test_evaluate_campaign_transcript_persists_and_returns(monkeypatch):
     assert "criteria" in result
     assert len(result["criteria"]) == 7
     judge_service.save_evaluation.assert_awaited_once()
+
+
+# ---- compute_user_average_evaluation ----
+
+def _make_evaluation(session_id: str, overall_score: float, criterion_scores: dict[int, float]) -> dict:
+    return {
+        "sessionId": session_id,
+        "overallScore": overall_score,
+        "overallGrade": judge_service._grade_from_score(overall_score),
+        "criteria": [
+            {"id": crit_id, "name": f"Criterion {crit_id}", "weight": 0.1, "score": score}
+            for crit_id, score in criterion_scores.items()
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_compute_user_average_evaluation_averages_across_evaluated_runs(monkeypatch):
+    monkeypatch.setattr(
+        campaign_store, "list_campaigns_for_user",
+        AsyncMock(return_value=[{"session_id": "s1"}, {"session_id": "s2"}, {"session_id": "s3"}]),
+    )
+
+    evaluations = {
+        "s1": _make_evaluation("s1", 100.0, {1: 100, 2: 50}),
+        "s2": _make_evaluation("s2", 50.0, {1: 50, 2: 50}),
+        "s3": None,  # not yet evaluated -- must be excluded, not treated as 0
+    }
+    monkeypatch.setattr(
+        judge_service, "get_cached_evaluation",
+        AsyncMock(side_effect=lambda session_id: evaluations[session_id]),
+    )
+
+    result = await judge_service.compute_user_average_evaluation("user-123")
+
+    assert result["userId"] == "user-123"
+    assert result["totalRunCount"] == 3
+    assert result["evaluatedRunCount"] == 2
+    assert result["averageScore"] == 75.0
+    assert result["averageGrade"] == "Good"
+    criteria_by_id = {c["id"]: c for c in result["criteria"]}
+    assert criteria_by_id[1]["averageScore"] == 75.0
+    assert criteria_by_id[2]["averageScore"] == 50.0
+
+
+@pytest.mark.asyncio
+async def test_compute_user_average_evaluation_with_no_evaluated_runs(monkeypatch):
+    monkeypatch.setattr(
+        campaign_store, "list_campaigns_for_user",
+        AsyncMock(return_value=[{"session_id": "s1"}]),
+    )
+    monkeypatch.setattr(judge_service, "get_cached_evaluation", AsyncMock(return_value=None))
+
+    result = await judge_service.compute_user_average_evaluation("user-456")
+
+    assert result["totalRunCount"] == 1
+    assert result["evaluatedRunCount"] == 0
+    assert result["averageScore"] == 0.0
+    assert result["criteria"] == []
+
+
+@pytest.mark.asyncio
+async def test_compute_user_average_evaluation_with_no_campaigns(monkeypatch):
+    monkeypatch.setattr(campaign_store, "list_campaigns_for_user", AsyncMock(return_value=[]))
+    monkeypatch.setattr(judge_service, "get_cached_evaluation", AsyncMock(return_value=None))
+
+    result = await judge_service.compute_user_average_evaluation("user-789")
+
+    assert result["totalRunCount"] == 0
+    assert result["evaluatedRunCount"] == 0
+    assert result["averageScore"] == 0.0

@@ -7,6 +7,7 @@ import type {
   AgentHealthReport,
   BenchmarkBrief,
   JudgeEvaluationResult,
+  AverageEvaluationReport,
   QuotaStatusResponse,
 } from "./types";
 import { selectTranscript, isTerminal } from "./selectTranscript";
@@ -212,6 +213,23 @@ export function useCampaignEvaluation(sessionId: string | undefined) {
       return fetchCampaignEvaluation(sessionId);
     },
     enabled: Boolean(sessionId),
+    staleTime: 60_000,
+  });
+}
+
+async function fetchUserAverageEvaluation(): Promise<AverageEvaluationReport> {
+  return authedFetch("/evals/average") as Promise<AverageEvaluationReport>;
+}
+
+/** The average-rubric-across-all-runs section rendered above the per-brief
+ * runs list -- one call per signed-in user, not per campaign, so it is
+ * cached under its own query key rather than nested under a sessionId
+ * like useCampaignEvaluation.
+ */
+export function useUserAverageEvaluation() {
+  return useQuery({
+    queryKey: ["evals", "average"],
+    queryFn: fetchUserAverageEvaluation,
     staleTime: 60_000,
   });
 }

@@ -20,6 +20,11 @@ from events_normalizer import dedupe_by_id, normalize_events
 
 logger = logging.getLogger("broker.judge_service")
 
+# Rounding applied to every averaged score before it leaves this module, so
+# the broker's JSON responses and the SPA's rendering never disagree over
+# how many decimal places a mean of arbitrary run counts should carry.
+_AVERAGE_SCORE_DECIMALS = 1
+
 RUBRIC_CRITERIA_DEFINITIONS = [
     {
         "id": 1,
@@ -334,3 +339,89 @@ async def evaluate_campaign_transcript(session_id: str, prompt: str, steps: list
 
     await save_evaluation(session_id, full_result)
     return full_result
+
+
+def _grade_from_score(score: float) -> str:
+    """Mirrors the 100/75/50/25 rating bands used per-criterion and by
+    _heuristic_evaluate above, so an averaged score is labeled consistently
+    with every individual scorecard's own grade.
+    """
+    if score >= 90:
+        return "Excellent"
+    if score >= 75:
+        return "Good"
+    if score >= 50:
+        return "Developing"
+    return "Unsatisfactory"
+
+
+async def compute_user_average_evaluation(user_id: str) -> dict[str, Any]:
+    """Averages every cached rubric scorecard across all of `user_id`'s
+    campaign runs -- the aggregate counterpart to the single-session
+    scorecard evaluate_campaign_transcript/get_cached_evaluation produce.
+
+    Only campaigns that already have a cached evaluation ("evaluatedAt" in
+    Firestore) contribute; a campaign never judged (or still running) is
+    simply excluded rather than treated as a zero, since it has no rubric
+    scorecard to average in. Per-criterion averages are matched by
+    criterion `id`, not list position, because a run's `criteria` list
+    could in principle be produced in a different order by the LLM judge.
+    """
+    campaign_docs = await campaign_store.list_campaigns_for_user(user_id)
+    session_ids = [doc.get("session_id") for doc in campaign_docs if doc.get("session_id")]
+
+    evaluations = await asyncio.gather(
+        *(get_cached_evaluation(session_id) for session_id in session_ids)
+    )
+    evaluated = [e for e in evaluations if e]
+
+    generated_at = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+    if not evaluated:
+        return {
+            "userId": user_id,
+            "totalRunCount": len(session_ids),
+            "evaluatedRunCount": 0,
+            "averageScore": 0.0,
+            "averageGrade": "Unsatisfactory",
+            "criteria": [],
+            "generatedAt": generated_at,
+        }
+
+    average_score = sum(float(e.get("overallScore", 0.0)) for e in evaluated) / len(evaluated)
+
+    # Sum/count per criterion id across every evaluated run, then divide --
+    # criteria definitions live in RUBRIC_CRITERIA_DEFINITIONS so a run with
+    # a missing or partial criteria list still yields correct averages for
+    # whichever criteria it did report.
+    criterion_totals: dict[int, dict[str, Any]] = {}
+    for e in evaluated:
+        for crit in e.get("criteria", []) or []:
+            crit_id = crit.get("id")
+            if crit_id is None:
+                continue
+            entry = criterion_totals.setdefault(
+                crit_id, {"name": crit.get("name", ""), "weight": crit.get("weight", 0.0), "sum": 0.0, "count": 0}
+            )
+            entry["sum"] += float(crit.get("score", 0.0))
+            entry["count"] += 1
+
+    criteria_averages = [
+        {
+            "id": crit_id,
+            "name": entry["name"],
+            "weight": entry["weight"],
+            "averageScore": round(entry["sum"] / entry["count"], _AVERAGE_SCORE_DECIMALS),
+        }
+        for crit_id, entry in sorted(criterion_totals.items())
+    ]
+
+    return {
+        "userId": user_id,
+        "totalRunCount": len(session_ids),
+        "evaluatedRunCount": len(evaluated),
+        "averageScore": round(average_score, _AVERAGE_SCORE_DECIMALS),
+        "averageGrade": _grade_from_score(average_score),
+        "criteria": criteria_averages,
+        "generatedAt": generated_at,
+    }

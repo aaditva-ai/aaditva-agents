@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useCampaigns } from "../api/queries";
 import { AgentHealthGrid } from "../components/evals/AgentHealthGrid";
+import { AverageRubricCard } from "../components/evals/AverageRubricCard";
 import { BenchmarkBriefsCard } from "../components/evals/BenchmarkBriefsCard";
 import { JudgeScorecard } from "../components/evals/JudgeScorecard";
 
@@ -117,7 +118,8 @@ export function EvaluationRoute() {
         )}
 
         {(activeTab === "all" || activeTab === "benchmarks") && (
-          <section id="benchmarks-section">
+          <section id="benchmarks-section" className="space-y-4">
+            <AverageRubricCard />
             <BenchmarkBriefsCard />
           </section>
         )}

@@ -2,9 +2,21 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useCampaignEvents, useAgentHealth, useBenchmarkBriefs, useTriggerJudgeEval } from "./queries";
+import {
+  useCampaignEvents,
+  useAgentHealth,
+  useBenchmarkBriefs,
+  useTriggerJudgeEval,
+  useUserAverageEvaluation,
+} from "./queries";
 import * as authedFetchModule from "./authedFetch";
-import type { EventsPage, AgentHealthReport, BenchmarkBrief, JudgeEvaluationResult } from "./types";
+import type {
+  EventsPage,
+  AgentHealthReport,
+  BenchmarkBrief,
+  JudgeEvaluationResult,
+  AverageEvaluationReport,
+} from "./types";
 
 /**
  * Regression coverage for the bug caught during Step 5 build/validation:
@@ -227,5 +239,30 @@ describe("Evaluation API queries", () => {
     expect(mutateRes?.overallScore).toBe(100.0);
     const cached = queryClient.getQueryData(["campaign", "sess-judge-1", "evaluation"]);
     expect(cached).toEqual(mockEvalResult);
+  });
+
+  it("useUserAverageEvaluation fetches the aggregate scorecard from /evals/average", async () => {
+    const mockReport: AverageEvaluationReport = {
+      userId: "user-123",
+      totalRunCount: 3,
+      evaluatedRunCount: 2,
+      averageScore: 87.5,
+      averageGrade: "Good",
+      criteria: [
+        { id: 1, name: "Multi-Agent Orchestration & Workflow", weight: 0.2, averageScore: 87.5 },
+      ],
+      generatedAt: "2026-09-01T12:00:00Z",
+    };
+
+    const authedFetch = vi.spyOn(authedFetchModule, "authedFetch").mockResolvedValueOnce(mockReport);
+
+    const { result } = renderHook(() => useUserAverageEvaluation(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(authedFetch).toHaveBeenCalledWith("/evals/average");
+    expect(result.current.data?.averageScore).toBe(87.5);
+    expect(result.current.data?.evaluatedRunCount).toBe(2);
   });
 });

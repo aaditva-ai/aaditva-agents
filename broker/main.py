@@ -373,6 +373,21 @@ async def handle_get_campaign_eval(request: Request) -> JSONResponse:
     return JSONResponse({"sessionId": session_id, "evaluated": False})
 
 
+async def handle_get_average_eval(request: Request) -> JSONResponse:
+    """GET /evals/average -- the aggregate rubric scorecard shown above the
+    per-brief runs section (Evaluation Dashboard): averages every cached
+    LLM Judge evaluation across all of the signed-in caller's campaign
+    runs, not just one session at a time.
+    """
+    try:
+        user = _require_user(request)
+    except auth.AuthError as e:
+        return JSONResponse({"error": "unauthorized", "detail": str(e)}, status_code=401)
+
+    report = await judge_service.compute_user_average_evaluation(user.uid)
+    return JSONResponse(report)
+
+
 async def handle_health(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
@@ -406,6 +421,7 @@ app = Starlette(
         Route("/evals/prepare-quotas", handle_eval_prepare_quotas, methods=["POST"]),
         Route("/evals/judge", handle_trigger_judge, methods=["POST"]),
         Route("/evals/campaigns/{session_id}", handle_get_campaign_eval, methods=["GET"]),
+        Route("/evals/average", handle_get_average_eval, methods=["GET"]),
         Route("/healthz", handle_health, methods=["GET"]),
     ]
 )

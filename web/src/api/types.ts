@@ -91,6 +91,27 @@ export interface JudgeEvaluationResult {
   evaluated?: boolean;
 }
 
+export interface AverageCriterionEval {
+  id: number;
+  name: string;
+  weight: number;
+  averageScore: number;
+}
+
+// GET /evals/average -- the aggregate rubric scorecard across every one of
+// the signed-in caller's campaign runs that already has a cached
+// JudgeEvaluationResult (see judge_service.compute_user_average_evaluation),
+// rendered as the section above the per-brief runs list.
+export interface AverageEvaluationReport {
+  userId: string;
+  totalRunCount: number;
+  evaluatedRunCount: number;
+  averageScore: number;
+  averageGrade: "Excellent" | "Good" | "Developing" | "Unsatisfactory";
+  criteria: AverageCriterionEval[];
+  generatedAt: string;
+}
+
 export interface QuotaStatusResponse {
   status: "ready" | "pending" | "error";
   elevated: boolean;

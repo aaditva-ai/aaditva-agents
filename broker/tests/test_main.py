@@ -550,3 +550,34 @@ def test_eval_judge_returns_cached_evaluation(monkeypatch):
     resp = _client().post("/evals/judge", json={"sessionId": session_id})
     assert resp.status_code == 200
     assert resp.json()["cached"] is True
+
+
+# ---- GET /evals/average ----
+
+def test_eval_average_rejects_unauthenticated(monkeypatch):
+    def _raise(header):
+        raise auth.AuthError("bad token")
+    monkeypatch.setattr(auth, "verify_id_token", _raise)
+    resp = _client().get("/evals/average")
+    assert resp.status_code == 401
+
+
+def test_eval_average_calls_compute_for_the_authenticated_user(monkeypatch):
+    compute_average = AsyncMock(return_value={
+        "userId": "user-123",
+        "totalRunCount": 2,
+        "evaluatedRunCount": 2,
+        "averageScore": 87.5,
+        "averageGrade": "Good",
+        "criteria": [{"id": 1, "name": "Multi-Agent Orchestration & Workflow", "weight": 0.20, "averageScore": 87.5}],
+        "generatedAt": "2026-09-04T00:00:00Z",
+    })
+    monkeypatch.setattr(main.judge_service, "compute_user_average_evaluation", compute_average)
+
+    resp = _client().get("/evals/average")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["averageScore"] == 87.5
+    assert data["evaluatedRunCount"] == 2
+    compute_average.assert_awaited_once_with("user-123")
