@@ -9,43 +9,58 @@ A distributed, multimodal multi-agent marketing campaign generation studio power
 
 ---
 
-## Table of Contents
-1. [Architecture & Workflow](#1-architecture--workflow)
-2. [Rubric & Assessment Map](#2-rubric--assessment-map)
-3. [Prerequisites](#3-prerequisites)
-4. [Environment Configuration](#4-environment-configuration)
-5. [Credentials, Service Accounts & IAM Permissions](#5-credentials-service-accounts--iam-permissions)
-6. [Local Development & Per-Agent Execution](#6-local-development--per-agent-execution)
-7. [Agent Card Verification](#7-agent-card-verification)
-8. [Cloud Deployment](#8-cloud-deployment)
-9. [Running Campaigns](#9-running-campaigns)
-10. [Observability & Tracing](#10-observability--tracing)
-11. [Notion Integration & Image Embedding](#11-notion-integration--image-embedding)
-12. [Teardown & Clean Up](#12-teardown--clean-up)
-13. [Troubleshooting](#13-troubleshooting)
-14. [Repository Structure](#14-repository-structure)
+## Live Demo
+
+- **Live Application**: [https://aaditva.web.app/](https://aaditva.web.app/)
+- **Evaluation & Benchmark Dashboard**: [https://aaditva.web.app/evaluation](https://aaditva.web.app/evaluation) — Run pre-configured common briefs, verify live A2A agent infrastructure health, and execute LLM-as-a-Judge rubric audits directly in the browser.
 
 ---
 
-## 1. Architecture & Workflow
+## Table of Contents
+1. [Live Demo](#live-demo)
+2. [Architecture & Workflow](#2-architecture--workflow)
+3. [Rubric & Assessment Map](#3-rubric--assessment-map)
+4. [Prerequisites](#4-prerequisites)
+5. [Environment Configuration](#5-environment-configuration)
+6. [Credentials, Service Accounts & IAM Permissions](#6-credentials-service-accounts--iam-permissions)
+7. [Local Development & Per-Agent Execution](#7-local-development--per-agent-execution)
+8. [Agent Card Verification](#8-agent-card-verification)
+9. [Cloud Deployment](#9-cloud-deployment)
+10. [Running Campaigns](#10-running-campaigns)
+11. [Observability & Tracing](#11-observability--tracing)
+12. [Notion Integration & Image Embedding](#12-notion-integration--image-embedding)
+13. [Teardown & Clean Up](#13-teardown--clean-up)
+14. [Troubleshooting](#14-troubleshooting)
+15. [Repository Structure](#15-repository-structure)
 
-The system is organized into **6 cooperating agents** (1 orchestrator and 5 specialist microservices):
+---
+
+## 2. Architecture & Workflow
+
+The system is organized into **6 cooperating agents** (1 orchestrator and 5 specialist microservices), supported by an asynchronous execution driver, a backend API broker, and a modern single-page web interface:
 
 1. **Creative Director (Orchestrator)** — Deployed on **Vertex AI Agent Engine**. Manages high-level pipeline execution, orchestrates specialists via ADK `AgentTool(RemoteA2aAgent)`, enforces limits, and drives the quality gate re-review loop.
 2. **Brand Strategist** — Deployed on **Cloud Run**. Researches competitive landscape and audience positioning using dynamic real-time `google_search` grounding.
 3. **Copywriter** — Deployed on **Cloud Run**. Generates audience-targeted captions using an **ADK Skill** (`skills/instagram-copywriting/`).
-4. **Designer** — Deployed on **Cloud Run**. Formulates visual prompts with explicit aspect ratios (`1:1` or `4:5`) and generates assets via Imagen model, uploading PNGs to Cloud Storage.
+4. **Designer** — Deployed on **Cloud Run**. Formulates visual prompts with explicit aspect ratios (`1:1` or `4:5`) and generates assets via Imagen/Gemini models, uploading PNGs to Cloud Storage.
 5. **Critic (Quality Gate)** — Deployed on **Cloud Run**. Evaluates copy and visuals using real multimodal inspection (`Part.from_uri` on GCS blobs), returning structured scores and an `APPROVED` or `NEEDS_REVISION` verdict.
 6. **Project Manager** — Deployed on **Cloud Run**. Plans timelines and publishes structured deliverables and **Direct Upload embedded images** to Notion via **MCP (Model Context Protocol)**.
+7. **Broker & Campaign Driver** — Deployed on **Cloud Run**. Manages user authentication, token-bucket rate limiting, async job queuing via **Cloud Tasks**, and background campaign execution.
+8. **Web SPA** — Hosted on **Firebase Hosting**. Real-time dashboard for live streaming campaign generation, evaluation benchmarks, and LLM-as-a-Judge audits.
 
 ```mermaid
 graph TD
-    User([User / CLI run_campaign.py]) --> CD[Creative Director<br/>Vertex AI Agent Engine]
+    User([User / Web SPA / CLI run_campaign.py]) --> Broker[Broker Gateway<br/>Cloud Run FastAPI]
+    Broker -->|Enqueues Task| Queue[(Cloud Tasks<br/>campaigns queue)]
+    Queue -->|Push OIDC /drive| CDriver[Campaign Driver<br/>Cloud Run]
+    CDriver -->|Executes Session| CD[Creative Director<br/>Vertex AI Agent Engine]
+    
+    User -.->|Direct CLI / ADK Web| CD
     
     subgraph "Specialist Microservices (Cloud Run A2A Servers)"
         BS[Brand Strategist<br/>Port 8082<br/>google_search]
         CW[Copywriter<br/>Port 8083<br/>ADK Skill]
-        DE[Designer<br/>Port 8084<br/>Imagen Tool]
+        DE[Designer<br/>Port 8084<br/>Imagen / Gemini Tool]
         CR[Critic<br/>Port 8085<br/>Multimodal Review]
         PM[Project Manager<br/>Port 8086<br/>Notion MCP & Uploads]
     end
@@ -71,7 +86,7 @@ graph TD
 
 ---
 
-## 2. Rubric & Assessment Map
+## 3. Rubric & Assessment Map
 
 This repository implements all requirements outlined in `Grading Rubric.html`. For full scoring rationale and command evidence, see **[`EVALUATION.md`](EVALUATION.md)**.
 
@@ -87,7 +102,7 @@ This repository implements all requirements outlined in `Grading Rubric.html`. F
 
 ---
 
-## 3. Prerequisites
+## 4. Prerequisites
 
 - **Python 3.11+**
 - **[uv](https://docs.astral.sh/uv/)** package manager installed:
@@ -97,6 +112,14 @@ This repository implements all requirements outlined in `Grading Rubric.html`. F
   
   # Windows (PowerShell)
   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
+- **[Bun](https://bun.sh)** package manager installed (required for `web/` frontend):
+  ```bash
+  # Linux/macOS
+  curl -fsSL https://bun.sh/install | bash
+
+  # Windows (PowerShell)
+  powershell -c "irm bun.sh/install.ps1 | iex"
   ```
 - **Google Cloud SDK (`gcloud`)** installed and authenticated:
   ```bash
@@ -115,12 +138,14 @@ This repository implements all requirements outlined in `Grading Rubric.html`. F
     secretmanager.googleapis.com \
     iam.googleapis.com \
     iamcredentials.googleapis.com \
-    cloudresourcemanager.googleapis.com
+    cloudresourcemanager.googleapis.com \
+    firestore.googleapis.com \
+    cloudtasks.googleapis.com
   ```
 
 ---
 
-## 4. Environment Configuration
+## 5. Environment Configuration
 
 1. Initialize your local configuration file from the template:
    ```bash
@@ -143,15 +168,16 @@ This repository implements all requirements outlined in `Grading Rubric.html`. F
 | `NOTION_TOKEN` | *(Optional)* Notion API integration token | `secret_...` |
 | `NOTION_PROJECT_DATABASE_ID` | *(Optional)* Notion Projects Database UUID | `32-char-uuid` |
 | `NOTION_TASKS_DATABASE_ID` | *(Optional)* Notion Tasks Database UUID | `32-char-uuid` |
-| `IMAGE_GEN_REGIONS` | Ordered *candidate* Vertex AI regions the Designer's Cloud Tasks handler fails over across on `429`/`RESOURCE_EXHAUSTED`. `deploy/deploy_all_specialists.py` verifies at deploy time that `GEMINI_IMAGE_MODEL` can actually be invoked in each one (a trial `generate_content` call, not just a `models.get` metadata check -- the publisher-model catalog is mirrored to every region for browsing, so `models.get` alone doesn't reflect real per-region serving availability), and only forwards the confirmed regions to the deployed service (falling back to `global` if none are confirmed) -- so this list is safe to keep broad even if the configured model isn't available everywhere. Within each region, `_generate_with_region_failover` (`agents/designer/image_gen_tool.py`) also retries a `429` up to 3 times with exponential backoff before moving to the next region, since a burst of concurrent concept images can transiently exceed quota on a single endpoint (this matters most when only `global` is confirmed available, since there's nowhere else to fail over to) | `us-central1,us-east4,europe-west4` |
+| `IMAGE_GEN_REGIONS` | Ordered *candidate* Vertex AI regions the Designer's Cloud Tasks handler fails over across on `429`/`RESOURCE_EXHAUSTED`. | `us-central1,us-east4,europe-west4` |
 | `GCP_TASKS_LOCATION` | Cloud Tasks queue location for the image-generation queue | `us-central1` |
 | `IMAGE_GEN_TASKS_QUEUE` | Cloud Tasks queue name used to dispatch image-generation jobs | `image-generation` |
 | `IMAGE_GEN_TASKS_INVOKER_SA` | Service account email Cloud Tasks uses to authenticate pushes to the internal task handler | `image-gen-tasks-invoker@PROJECT.iam.gserviceaccount.com` |
 | `IMAGE_GEN_TASK_HANDLER_URL` | Full URL of the Designer's `/internal/tasks/generate-image` push endpoint | `https://designer-xxxxx.a.run.app/internal/tasks/generate-image` |
-| `IMAGE_GEN_RATE_LIMIT_CAPACITY` | Max image-generation requests per user per window (Firestore token bucket) | `3` |
-| `IMAGE_GEN_RATE_LIMIT_WINDOW_SECONDS` | Refill window in seconds for the per-user rate limit | `60` |
-| `IMAGE_GEN_JOB_POLL_INTERVAL_SECONDS` | How often `generate_image` polls the Firestore job document for a result | `1` |
-| `IMAGE_GEN_JOB_TIMEOUT_SECONDS` | Max time `generate_image` waits for the Cloud Tasks handler to complete a job before returning a timeout error | `170` |
+| `CAMPAIGN_TASKS_LOCATION` | Cloud Tasks queue location for campaign dispatch | `us-central1` |
+| `CAMPAIGN_TASKS_QUEUE` | Cloud Tasks queue name for campaign dispatch | `campaigns` |
+| `CAMPAIGN_TASKS_INVOKER_SA` | Service account email Cloud Tasks uses to invoke the campaign driver | `campaign-tasks-invoker@PROJECT.iam.gserviceaccount.com` |
+| `CAMPAIGN_TASK_HANDLER_URL` | Full URL of the campaign-driver `/drive` push endpoint | `https://campaign-driver-xxxxx.a.run.app/drive` |
+| `BROKER_ALLOWED_ORIGINS` | Comma-separated CORS allowlist for Broker API | `https://aaditva.web.app,http://localhost:5173` |
 
 3. Create the GCS bucket with Uniform Bucket-Level Access:
    ```bash
@@ -162,7 +188,7 @@ This repository implements all requirements outlined in `Grading Rubric.html`. F
 
 ---
 
-## 5. Credentials, Service Accounts & IAM Permissions
+## 6. Credentials, Service Accounts & IAM Permissions
 
 ### Required Runtime Permissions Matrix
 
@@ -208,22 +234,23 @@ gcloud projects add-iam-policy-binding $GOOGLE_CLOUD_PROJECT \
 
 ---
 
-## 6. Local Development & Per-Agent Execution
+## 7. Local Development & Per-Agent Execution
+
+The orchestrator (Creative Director) coordinates with specialists across distributed **Agent-to-Agent (A2A)** HTTP endpoints.
+
+> **Important Workflow Note**: Running `uv run adk web agents` starts the ADK web interface and loads the orchestrator, but **does not** automatically host the remote specialist A2A microservices. For the Creative Director to execute tools and hand off sub-tasks locally, the 5 specialist agents must be running concurrently to serve A2A requests (or `.env` must be configured to point to deployed Cloud Run specialist endpoints).
 
 Source your environment variables before running local commands:
 ```bash
+# Linux/macOS
 set -a; source .env; set +a
+
+# Windows (PowerShell)
+Get-Content .env | Where-Object { $_ -match '^[^#=]+=' } | ForEach-Object { $k, $v = $_.Split('=', 2); [System.Environment]::SetEnvironmentVariable($k.Trim(), $v.Trim()) }
 ```
 
-### Option A: Interactive Multi-Agent Web UI
-Launch the ADK developer UI to inspect and test all agents in a single interface:
-```bash
-uv run adk web agents --allow_origins='*'
-```
-Navigate to `http://localhost:8000` in your browser.
-
-### Option B: Standalone A2A Servers (Ports 8082–8086)
-Run each specialist agent in its own terminal on designated non-colliding ports:
+### Step 1: Start Standalone Specialist A2A Microservices (Ports 8082–8086)
+Run each specialist agent in its own terminal on its designated non-colliding port:
 
 | Specialist Agent | Local Terminal Command | Advertised Agent Card URL |
 |---|---|---|
@@ -235,7 +262,7 @@ Run each specialist agent in its own terminal on designated non-colliding ports:
 
 > **Dual Configuration Pattern**: Each specialist listens on `HOST:PORT` while advertising `PUBLIC_HOST:PUBLIC_PORT` over protocol `PROTOCOL` in its agent card. When running locally, defaults resolve to `localhost:<PORT>`.
 
-### Pointing Orchestrator to Local Specialists
+### Step 2: Configure Specialist URLs in `.env`
 Update `.env` to point the Creative Director at your local specialist servers:
 ```env
 STRATEGIST_AGENT_URL=http://localhost:8082
@@ -244,10 +271,33 @@ DESIGNER_AGENT_URL=http://localhost:8084
 CRITIC_AGENT_URL=http://localhost:8085
 PM_AGENT_URL=http://localhost:8086
 ```
-Then run `uv run adk web agents` and select `creative_director`.
+*(Alternatively, if testing only the orchestrator locally against deployed specialists, set these to your deployed Cloud Run URLs).*
+
+### Step 3: Run the Orchestrator via ADK Web UI
+Launch the ADK developer UI to interact with the orchestrator:
+```bash
+uv run adk web agents --allow_origins='*'
+```
+Navigate to `http://localhost:8000` in your browser and select `creative_director`.
+
+### (Optional) Local Full-Stack Web App Execution
+To run the full stack locally with the React SPA and Broker gateway:
+1. **Start the Broker** (FastAPI backend):
+   ```bash
+   cd broker
+   uv run uvicorn main:app --port 8080 --reload
+   cd ..
+   ```
+2. **Start the Web Frontend** (Vite + React SPA):
+   ```bash
+   cd web
+   bun install
+   bun run dev
+   ```
+   Navigate to `http://localhost:5173`.
 
 ### Local Setup for the Image-Generation Queue (Designer)
-The Designer's `generate_image` tool always talks to real Cloud Tasks + Firestore -- there is no in-process/emulated fallback -- so these two resources must exist even when you're only running the Designer locally and never running `deploy/deploy_all_specialists.py`:
+The Designer's `generate_image` tool talks to real Cloud Tasks + Firestore (there is no in-process/emulated fallback), so these resources must be provisioned even when running the Designer locally:
 
 1. **Create the Firestore database** (enabling the Firestore API alone is *not* enough -- a database must also be explicitly created):
    ```bash
@@ -260,7 +310,7 @@ The Designer's `generate_image` tool always talks to real Cloud Tasks + Firestor
    gcloud tasks queues create $IMAGE_GEN_TASKS_QUEUE \
      --location=$GCP_TASKS_LOCATION --project=$GOOGLE_CLOUD_PROJECT
    ```
-3. **Give the Designer a real HTTPS URL Cloud Tasks can push to.** Cloud Tasks cannot reach `localhost`, and there is no Google-managed "tunnel to your laptop" product equivalent to ngrok (`gcloud run services proxy` tunnels the *opposite* direction — local machine to a deployed Cloud Run service). The supported approach here is to deploy the Designer itself to Cloud Run as a normal (even throwaway/dev) revision, so Cloud Tasks pushes straight to that URL instead of your machine:
+3. **Give the Designer a real HTTPS URL Cloud Tasks can push to.** Cloud Tasks cannot reach `localhost`, and there is no Google-managed "tunnel to your laptop" product equivalent to ngrok (`gcloud run services proxy` tunnels the *opposite* direction — local machine to a deployed Cloud Run service). The supported approach here is to deploy the Designer itself to Cloud Run as a normal revision so Cloud Tasks pushes straight to that URL:
    ```bash
    cd agents/designer
    cat > /tmp/designer-env-vars.yaml <<EOF
@@ -281,10 +331,10 @@ The Designer's `generate_image` tool always talks to real Cloud Tasks + Firestor
      --env-vars-file=/tmp/designer-env-vars.yaml
    cd ../..
    ```
-   > **Note**: `--set-env-vars`'s default delimiter is `,`, which collides with the commas inside `IMAGE_GEN_REGIONS`'s region list (gcloud would otherwise fail with `Bad syntax for dict arg`). An older revision of this guide worked around that with gcloud's `^|^` alternate-delimiter escaping, but that syntax gets mangled when `gcloud.cmd` is invoked through a script on Windows (the shell re-parses the literal `|` characters as real pipe operators). `--env-vars-file` sidesteps the whole problem by reading values from a YAML file instead of a delimited string -- this is also what `deploy/deploy_all_specialists.py` now uses internally.
+   > **Note**: `--env-vars-file` sidesteps Windows batch/shell delimiter issues with comma-separated region lists.
 
-   This is the same command `deploy/deploy_all_specialists.py` runs for `designer` (that script deploys all 5 specialists at once; use the command above if you only want the Designer). Take the printed service URL and set `IMAGE_GEN_TASK_HANDLER_URL` in `.env` to that URL plus `/internal/tasks/generate-image` (e.g. `https://designer-xxxxx-uc.a.run.app/internal/tasks/generate-image`). You can keep developing the other specialists/orchestrator locally as usual and just point `DESIGNER_AGENT_URL` at this Cloud Run URL instead of `http://localhost:8084` if you also want the ADK tool call itself to reach the deployed Designer; otherwise a locally-run Designer process can still enqueue tasks that this deployed revision's handler will pick up and complete via Firestore.
-4. **Create the invoker service account and grant IAM roles** (mirrors what `deploy/deploy_all_specialists.py` does for a deployed Designer):
+   Set `IMAGE_GEN_TASK_HANDLER_URL` in `.env` to the printed service URL plus `/internal/tasks/generate-image` (e.g. `https://designer-xxxxx-uc.a.run.app/internal/tasks/generate-image`).
+4. **Create the invoker service account and grant IAM roles**:
    ```bash
    gcloud iam service-accounts create image-gen-tasks-invoker --project=$GOOGLE_CLOUD_PROJECT
    IMAGE_GEN_TASKS_INVOKER_SA="image-gen-tasks-invoker@${GOOGLE_CLOUD_PROJECT}.iam.gserviceaccount.com"
@@ -298,11 +348,9 @@ The Designer's `generate_image` tool always talks to real Cloud Tasks + Firestor
    ```
    Set `IMAGE_GEN_TASKS_INVOKER_SA` in `.env` to the service account email above.
 
-If you see `PERMISSION_DENIED: Cloud Firestore API has not been used...` (or the confusing follow-on `ValueError: The transaction has no transaction ID, so it cannot be rolled back`) even after enabling the API in the console, it almost always means step 1 (creating the actual database) was skipped -- enabling the API and creating the database are two separate actions.
-
 ---
 
-## 7. Agent Card Verification
+## 8. Agent Card Verification
 
 The repository includes a dedicated verification utility to assert that agent cards are reachable, valid JSON, and advertising the correct URLs.
 
@@ -320,7 +368,7 @@ uv run python deploy/verify_agent_cards.py
 
 ---
 
-## 8. Cloud Deployment
+## 9. Cloud Deployment
 
 ### Step 1: Deploy Specialists to Cloud Run
 Builds and deploys all 5 specialist container images to Cloud Run, updates their A2A configs with HTTPS service URLs, configures Secret Manager for Notion, sets up IAM bindings, and writes URLs back to `.env`:
@@ -328,15 +376,10 @@ Builds and deploys all 5 specialist container images to Cloud Run, updates their
 uv run python deploy/deploy_all_specialists.py
 ```
 
-To (re)deploy just one or a few specialists (e.g. after only changing the Designer), pass `--agent`/`-a` (repeatable) with the service name (`brand-strategist`, `copywriter`, `designer`, `critic`, `project-manager`):
+To (re)deploy specific specialists, pass `--agent`/`-a` with the service name (`brand-strategist`, `copywriter`, `designer`, `critic`, `project-manager`):
 ```bash
 uv run python deploy/deploy_all_specialists.py --agent designer
 uv run python deploy/deploy_all_specialists.py -a designer -a critic
-```
-
-Verify deployed services:
-```bash
-gcloud run services list --region=$CLOUD_RUN_REGION
 ```
 
 ### Step 2: Deploy Creative Director to Agent Engine
@@ -345,14 +388,41 @@ Packages and deploys the Creative Director orchestrator to Vertex AI Agent Engin
 uv run python deploy/deploy_orchestrator.py --action deploy
 ```
 
-*(Alternative One-Shot)*:
+*(Alternative One-Shot Deploy)*:
 ```bash
 uv run python deploy/deploy_orchestrator.py --action deploy --auto-deploy-specialists
 ```
 
+### Step 3: Deploy Campaign Driver (Cloud Tasks Worker)
+Provisions the `campaigns` Cloud Tasks queue and deploys the `campaign-driver` Cloud Run service:
+```bash
+uv run python deploy/deploy_campaign_driver.py
+```
+
+### Step 4: Deploy Broker (API Gateway)
+Deploys the `broker` Cloud Run service with Firebase Auth verification and token-bucket rate limiting:
+```bash
+uv run python deploy/deploy_broker.py
+```
+
+### Step 5: Deploy Web SPA to Firebase Hosting
+Builds the static bundle and deploys the web client:
+```bash
+cd web
+bun install
+bun run build
+bun run deploy
+cd ..
+```
+
+Verify deployed Cloud Run services:
+```bash
+gcloud run services list --region=$CLOUD_RUN_REGION
+```
+
 ---
 
-## 9. Running Campaigns
+## 10. Running Campaigns
 
 ### CLI Runner (`run_campaign.py`)
 Run campaigns directly against the deployed Agent Engine from your terminal:
@@ -375,7 +445,7 @@ uv run python run_campaign.py --prompt-file docs/demo/briefs/revision-trigger.tx
 
 ---
 
-## 10. Observability & Tracing
+## 11. Observability & Tracing
 
 The deployment is instrumented with OpenTelemetry and ADK telemetry hooks.
 
@@ -388,7 +458,7 @@ The deployment is instrumented with OpenTelemetry and ADK telemetry hooks.
 
 ---
 
-## 11. Notion Integration & Image Embedding
+## 12. Notion Integration & Image Embedding
 
 When `NOTION_TOKEN`, `NOTION_PROJECT_DATABASE_ID`, and `NOTION_TASKS_DATABASE_ID` are configured, the Project Manager automatically registers campaign deliverables in Notion.
 
@@ -400,7 +470,7 @@ Rather than writing fragile, 1-hour expiring signed URLs as text, the Project Ma
 
 ---
 
-## 12. Teardown & Clean Up
+## 13. Teardown & Clean Up
 
 To delete all deployed Cloud Run services, staging buckets, Secret Manager secrets, and the Agent Engine instance:
 
@@ -420,62 +490,109 @@ gcloud storage buckets list --project=$GOOGLE_CLOUD_PROJECT
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 | Issue / Error | Cause | Solution |
 |---|---|---|
+| **Local A2A tool call fails / `ConnectionRefusedError`** | Specialist agents are not running locally or URLs are misconfigured | Ensure all 5 specialist services are running on ports 8082–8086 (`PORT=808x uv run agents/<agent>/agent.py`), or update `.env` with deployed Cloud Run specialist URLs. |
 | **Agent Card advertises `localhost` after deployment** | `--update-env-vars` failed during specialist deployment | Run `uv run python deploy/deploy_all_specialists.py` again or manually run `gcloud run services update <SERVICE> --update-env-vars=PUBLIC_HOST=<HOST>,PUBLIC_PORT=443,PROTOCOL=https`. |
 | **Designer GCS 403 Forbidden** | Service account lacks bucket write permissions | Run `gcloud storage buckets add-iam-policy-binding gs://$GCS_IMAGES_BUCKET --member=serviceAccount:<SA> --role=roles/storage.objectAdmin`. |
 | **Critic returns `NOT_REVIEWED` / read error** | Critic SA cannot read GCS bucket | Ensure Critic SA has `roles/storage.objectViewer` or `roles/storage.objectAdmin` on the bucket. |
 | **Unsigned or broken image links** | User ADC or SA missing TokenCreator role | Ensure signing SA has `roles/iam.serviceAccountTokenCreator` granted on itself and local user has it on the SA. |
 | **`reasoningEngines/None` error in `run_campaign.py`** | `AGENT_ENGINE_ID` missing in `.env` | Deploy orchestrator first via `uv run python deploy/deploy_orchestrator.py --action deploy`. |
 | **`generate_image` fails with `PERMISSION_DENIED: Cloud Firestore API has not been used...` even after enabling the API, or a follow-on `ValueError: The transaction has no transaction ID, so it cannot be rolled back`** | No Firestore *database* has been created for the project -- enabling the API alone doesn't create one; the rollback `ValueError` is Firestore's client masking that original error | Run `gcloud firestore databases create --location=$CLOUD_RUN_REGION --type=firestore-native --project=$GOOGLE_CLOUD_PROJECT`, then retry (see "Local Setup for the Image-Generation Queue" above). |
+| **Cloud Tasks task fails with `401 Unauthorized` on `/internal/tasks/generate-image` or `/drive`** | Invoker SA mismatch or missing OIDC token permissions | Verify `IMAGE_GEN_TASKS_INVOKER_SA` / `CAMPAIGN_TASKS_INVOKER_SA` matches the configured service account and has `roles/iam.serviceAccountUser` on the invoker SA. |
+| **Web SPA displays CORS or Network Error when contacting Broker** | `BROKER_ALLOWED_ORIGINS` in `.env` does not include the frontend origin | Add the frontend URL (e.g. `https://aaditva.web.app` or `http://localhost:5173`) to `BROKER_ALLOWED_ORIGINS` in `.env` and redeploy the broker via `uv run python deploy/deploy_broker.py`. |
 | **`gcloud run deploy designer` fails with `ERROR: (gcloud.run.deploy) argument --set-env-vars: Bad syntax for dict arg: [us-east4]`** | `IMAGE_GEN_REGIONS`'s comma-separated region list collides with `--set-env-vars`'s default comma delimiter between `KEY=VALUE` pairs | Use `--env-vars-file=<path-to-yaml>` as shown in "Local Setup for the Image-Generation Queue" instead of `--set-env-vars`, or run `deploy/deploy_all_specialists.py`, which already does this. |
 | **All deploys fail with `'GOOGLE_CLOUD_PROJECT' is not recognized as an internal or external command, operable program or batch file` (Windows only)** | An older version of `deploy/deploy_all_specialists.py` built `--set-env-vars` with a literal `^|^`-delimited string; since `gcloud` is `gcloud.cmd` on Windows, spawning it via subprocess routes the argument list back through `cmd.exe`, which reinterprets the literal `\|` characters as real pipe operators and splits the command in two | Pull the latest `deploy/deploy_all_specialists.py`, which now writes env vars to a temporary YAML file and passes `--env-vars-file=...` instead, avoiding shell/batch re-parsing entirely. |
 | **`404 NOT_FOUND. Publisher model .../locations/us-central1/publishers/google/models/<model> was not found` still happens in prod after a full deploy** | An earlier version of the deploy-time region check verified availability with a `models.get` metadata call, but Vertex AI's publisher-model catalog is mirrored to every region for browsing -- `models.get` can succeed in a region even though the model can't actually be invoked (`generate_content`) there, so a bad region like `us-central1` still slipped into `IMAGE_GEN_REGIONS` | Pull the latest `deploy/deploy_all_specialists.py`: `_verify_image_gen_regions` now probes each region with a real trial `generate_content` call (the same call the Designer makes at runtime) instead of `models.get`, so only regions that can truly serve `GEMINI_IMAGE_MODEL` are kept (falling back to `global` if none are confirmed). Redeploy after pulling this fix. |
-| **One or two concept images in a 3-image campaign briefly fail with `429 RESOURCE_EXHAUSTED` and the orchestrator visibly retries the Designer call before succeeding** | Generating 3 concept images at once can burst past the project's per-minute Vertex AI quota on a single endpoint, especially once `IMAGE_GEN_REGIONS` has fallen back to just `global` (no other region to fail over to). Cloud Run logs show `Image generation failed for <concept>: 429 RESOURCE_EXHAUSTED`; the task handler still reports the job as "complete" (with a `status: "error"` result) so Cloud Tasks itself won't retry it -- the retry seen is the ADK agent's own tool-call retry | `agents/designer/image_gen_tool.py`'s `_generate_with_region_failover` now retries a `429` in-region up to 3 times with exponential backoff (4s/8s/16s) before failing over/giving up, so a transient quota burst is usually absorbed silently. If it still surfaces often, request a Vertex AI quota increase for `generate_content` requests on the model/region, or spread concept generation out over time. |
+| **One or two concept images in a 3-image campaign briefly fail with `429 RESOURCE_EXHAUSTED` and the orchestrator visibly retries the Designer call before succeeding** | Generating 3 concept images at once can burst past the project's per-minute Vertex AI quota on a single endpoint, especially once `IMAGE_GEN_REGIONS` has fallen back to just `global` (no other region to fail over to). Cloud Run logs show `Image generation failed for <concept>: 429 RESOURCE_EXHAUSTED`; the task handler still reports the job as "complete" (with a `status: "error"` result) so Cloud Tasks itself won't retry it -- the retry seen is the ADK agent's own tool-call retry | `agents/designer/image_gen_tool.py`'s `_generate_with_region_failover` now retries a `429` in-region up to 3 times with exponential backoff (4s/8s/16s) before failing over/giving up, so a transient quota burst is usually absorbed silently. If it still surfaces often, request a Vertex AI quota increase for `generate_content` requests on the model/region using `bash deploy/setup_vertex_quotas.sh`, or spread concept generation out over time. |
 
 ---
 
-## 14. Repository Structure
+## 15. Repository Structure
 
 ```
 .
 ├── agents/
-│   ├── creative_director/       # Orchestrator agent (Agent Engine)
+│   ├── creative_director/       # Orchestrator agent (Vertex AI Agent Engine)
 │   │   ├── agent.py             # AgentTool + RemoteA2aAgent registration & limits
 │   │   ├── prompt.py            # Quality gate & re-review loop instructions
 │   │   ├── retry.py             # Orchestrator retry policy (5 attempts)
-│   │   └── get_image_links_tool.py # V4 GCS URL signing tool with titles
+│   │   ├── get_image_links_tool.py # V4 GCS URL signing tool with titles
+│   │   └── display_image_tool.py   # Inline image rendering helper
 │   ├── brand_strategist/        # Brand Strategist specialist (Cloud Run)
 │   │   ├── agent.py             # Research-only agent with google_search
+│   │   ├── retry.py             # Specialist retry configuration
 │   │   └── Dockerfile
 │   ├── copywriter/              # Copywriter specialist (Cloud Run)
 │   │   ├── agent.py             # ADK Skill loading (skills/instagram-copywriting)
-│   │   └── skills/              # Domain skill with SKILL.md, formulas, examples
+│   │   ├── retry.py             # Specialist retry configuration
+│   │   ├── skills/              # Domain skill with SKILL.md, formulas, examples
+│   │   └── Dockerfile
 │   ├── designer/                # Visual Designer specialist (Cloud Run)
 │   │   ├── agent.py             # Aspect-ratio enforced prompt & titles
-│   │   └── image_gen_tool.py    # Imagen generation tool with retry & error classification
+│   │   ├── image_gen_tool.py    # Imagen / Gemini generation with failover
+│   │   ├── job_store.py         # Firestore job state tracking
+│   │   ├── rate_limiter.py      # Firestore token-bucket rate limiter
+│   │   ├── task_queue.py        # Cloud Tasks job enqueueing
+│   │   ├── task_handler.py      # Internal Cloud Tasks push handler
+│   │   ├── retry.py             # Retry configuration
+│   │   └── Dockerfile
 │   ├── critic/                  # Critic & Quality Gate specialist (Cloud Run)
 │   │   ├── agent.py             # 1-10 scoring rubric and APPROVED/NEEDS_REVISION
-│   │   └── image_review_tool.py # Multimodal GCS inspection with retry options
+│   │   ├── image_review_tool.py # Multimodal GCS inspection with retry options
+│   │   ├── retry.py             # Specialist retry configuration
+│   │   └── Dockerfile
 │   └── project_manager/         # Project Manager specialist (Cloud Run)
 │       ├── agent.py             # Notion MCP integration & graceful fallback
-│       └── notion_image_tool.py # Direct Upload Notion image embedding
-├── deploy/
-│   ├── deploy_all_specialists.py # Cloud Run deployment & IAM permissions
+│       ├── notion_image_tool.py # Direct Upload Notion image embedding
+│       ├── retry.py             # Specialist retry configuration
+│       └── Dockerfile
+├── broker/                      # Backend API gateway (Cloud Run FastAPI)
+│   ├── auth.py                  # Firebase Auth token verification
+│   ├── campaign_limits.py       # Firestore rate limiting & concurrency caps
+│   ├── campaign_queue.py        # Cloud Tasks enqueueing
+│   ├── campaign_store.py        # Session & campaign transcript storage
+│   ├── eval_service.py          # A2A agent health probing & benchmark runner
+│   ├── judge_service.py         # LLM-as-a-Judge rubric evaluator
+│   ├── main.py                  # FastAPI application & endpoints
+│   └── Dockerfile
+├── campaign-driver/             # Async execution worker (Cloud Run)
+│   ├── campaign_store.py        # Session & event transcript streaming
+│   ├── main.py                  # Cloud Tasks /drive push handler & execution
+│   └── Dockerfile
+├── web/                         # Frontend application (Firebase Hosting)
+│   ├── src/                     # React + TypeScript source code
+│   │   ├── api/                 # API queries & transcript transformations
+│   │   ├── auth/                # Firebase Auth sign-in gate & hooks
+│   │   ├── components/          # UI components & evaluation views
+│   │   └── routes/              # Campaign builder & evaluation routes
+│   ├── package.json             # Bun dependencies & scripts
+│   ├── vite.config.ts           # Vite configuration
+│   └── firebase.json            # Firebase Hosting configuration
+├── deploy/                      # Automated GCP deployment & IAM provisioning
+│   ├── deploy_all_specialists.py # Cloud Run deployment for 5 specialists
 │   ├── deploy_orchestrator.py    # Agent Engine deployment
+│   ├── deploy_campaign_driver.py # Cloud Tasks queue & driver deployment
+│   ├── deploy_broker.py          # Broker API deployment
+│   ├── deploy_gradio.py          # Gradio deployment script
 │   ├── verify_agent_cards.py     # Local & deployed agent card verification
-│   ├── env_utils.py              # Environment variable helpers
-│   └── teardown_gcp.sh           # Resource teardown with image retention
+│   ├── setup_vertex_quotas.sh    # Quota increase automation script
+│   ├── env_utils.py              # Environment variable parsing helpers
+│   └── teardown_gcp.sh           # Safe resource teardown with image retention
 ├── docs/
-│   └── demo/
-│       └── briefs/              # Reusable campaign briefs (clean & revision trigger)
-├── EVALUATION.md                # Rubric self-assessment & evaluation evidence
+│   └── demo/briefs/             # Pre-configured campaign briefs
+├── scripts/                     # Performance benchmarks & model monitoring
+│   ├── benchmark_models.py      # Multi-model benchmarking suite
+│   ├── benchmark_speculative.py # Speculative decoding performance tests
+│   └── monitor_llm.py           # Real-time latency & token monitoring
+├── EVALUATION.md                # Comprehensive rubric evaluation & evidence
+├── LLM_Performance_Report.md    # Model latency & throughput analysis
 ├── run_campaign.py              # CLI campaign execution runner
 ├── pyproject.toml               # Project dependencies and packaging
 ├── uv.lock                      # Dependency lockfile
 └── README.md                    # Root project documentation
 ```
 
-> **Note on `gradio-ui/`**: The `gradio-ui` directory contains an experimental, local-only interface prototype and is not part of the graded multi-agent production deployment.
+> **Note on `gradio-ui/`**: The `gradio-ui` directory contains the initial local-only interface prototype which has been superseded in production by the high-performance React + TypeScript SPA in `web/`.
