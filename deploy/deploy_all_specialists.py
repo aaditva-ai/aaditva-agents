@@ -31,6 +31,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 # Import env_utils from same directory
 sys.path.insert(0, str(Path(__file__).parent))
 import env_utils
@@ -776,9 +780,25 @@ async def grant_all_storage_and_iam_permissions(
         GCLOUD_CMD, "projects", "describe", project_id,
         "--format=value(projectNumber)",
     ])
-    default_sa = f"{project_number_out.strip()}-compute@developer.gserviceaccount.com"
+    project_number = project_number_out.strip()
+    default_sa = f"{project_number}-compute@developer.gserviceaccount.com"
+    signing_sa = os.getenv("SIGNING_SERVICE_ACCOUNT") or default_sa
+
     if not sa_emails:
         sa_emails.add(default_sa)
+
+    # Add Reasoning Engine and dedicated component service accounts to the token creator grant list
+    token_invokers = set(sa_emails)
+    if project_number:
+        token_invokers.add(f"service-{project_number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com")
+    token_invokers.add(f"broker-sa@{project_id}.iam.gserviceaccount.com")
+    token_invokers.add(f"campaign-driver-sa@{project_id}.iam.gserviceaccount.com")
+
+    # Get active gcloud user account if available
+    _, active_account_out, _ = await run_command_async([
+        GCLOUD_CMD, "config", "get-value", "account",
+    ])
+    active_account = active_account_out.strip()
 
     for sa in sa_emails:
         # Grant Storage Object Admin on the campaign images bucket
@@ -816,6 +836,29 @@ async def grant_all_storage_and_iam_permissions(
             project_id,
             f"--member=serviceAccount:{sa}",
             "--role=roles/aiplatform.user",
+            "--quiet",
+        ])
+
+    # Grant token creator on the signing SA to Reasoning Engine, Driver, Broker, and active user
+    for invoker in token_invokers:
+        member = f"serviceAccount:{invoker}"
+        await run_command_async([
+            GCLOUD_CMD, "iam", "service-accounts", "add-iam-policy-binding",
+            signing_sa,
+            f"--member={member}",
+            "--role=roles/iam.serviceAccountTokenCreator",
+            f"--project={project_id}",
+            "--quiet",
+        ])
+
+    if active_account:
+        member_user = f"user:{active_account}"
+        await run_command_async([
+            GCLOUD_CMD, "iam", "service-accounts", "add-iam-policy-binding",
+            signing_sa,
+            f"--member={member_user}",
+            "--role=roles/iam.serviceAccountTokenCreator",
+            f"--project={project_id}",
             "--quiet",
         ])
 

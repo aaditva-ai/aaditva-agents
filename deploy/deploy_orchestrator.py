@@ -38,6 +38,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 import vertexai
 from dotenv import load_dotenv
 from vertexai import Client, agent_engines
@@ -153,6 +157,24 @@ def deploy_orchestrator(auto_deploy_specialists=False):
         app=root_app,
         enable_tracing=True,
     )
+
+    signing_sa = os.getenv("SIGNING_SERVICE_ACCOUNT") or f"{PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+    re_sa = f"service-{PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+    default_sa = f"{PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+
+    print("\n⏳ Ensuring IAM permissions for GCS signed URLs & Agent Engine...")
+    for member in [f"serviceAccount:{re_sa}", f"serviceAccount:{default_sa}"]:
+        subprocess.run(
+            [
+                "gcloud", "iam", "service-accounts", "add-iam-policy-binding",
+                signing_sa,
+                f"--member={member}",
+                "--role=roles/iam.serviceAccountTokenCreator",
+                f"--project={PROJECT_ID}",
+                "--quiet",
+            ],
+            capture_output=True,
+        )
 
     # =========================================================================
     # : Create AND Deploy with ALL config at once

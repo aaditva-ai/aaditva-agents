@@ -141,6 +141,30 @@ async def grant_iam(project_id: str, region: str, driver_sa: str, invoker_sa: st
     ])
     print(f"   {'✓' if rc3 == 0 else '⚠️ '} roles/run.invoker on {SERVICE_NAME} -> {invoker_sa}" + ("" if rc3 == 0 else f": {err3.strip()}"))
 
+    # Storage Object Admin on images bucket if configured
+    bucket = os.getenv("GCS_IMAGES_BUCKET")
+    if bucket:
+        rc_gcs, _, err_gcs = await run_command_async([
+            GCLOUD_CMD, "storage", "buckets", "add-iam-policy-binding", f"gs://{bucket}",
+            f"--member=serviceAccount:{driver_sa}",
+            "--role=roles/storage.objectAdmin",
+            f"--project={project_id}",
+            "--quiet",
+        ])
+        print(f"   {'✓' if rc_gcs == 0 else 'ℹ️ '} roles/storage.objectAdmin on gs://{bucket} -> {driver_sa}" + ("" if rc_gcs == 0 else f": {err_gcs.strip()}"))
+
+    # Service Account Token Creator on signing SA
+    signing_sa = os.getenv("SIGNING_SERVICE_ACCOUNT")
+    if signing_sa:
+        rc_sig, _, err_sig = await run_command_async([
+            GCLOUD_CMD, "iam", "service-accounts", "add-iam-policy-binding", signing_sa,
+            f"--member=serviceAccount:{driver_sa}",
+            "--role=roles/iam.serviceAccountTokenCreator",
+            f"--project={project_id}",
+            "--quiet",
+        ])
+        print(f"   {'✓' if rc_sig == 0 else 'ℹ️ '} roles/iam.serviceAccountTokenCreator on {signing_sa} -> {driver_sa}" + ("" if rc_sig == 0 else f": {err_sig.strip()}"))
+
 
 async def get_service_url(project_id: str, region: str) -> str | None:
     rc, stdout, _ = await run_command_async([

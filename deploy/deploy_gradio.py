@@ -8,6 +8,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 # Add project root to path for env_utils
 deploy_dir = Path(__file__).parent
 sys.path.insert(0, str(deploy_dir))
