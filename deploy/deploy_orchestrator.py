@@ -166,7 +166,7 @@ def deploy_orchestrator(auto_deploy_specialists=False):
     for member in [f"serviceAccount:{re_sa}", f"serviceAccount:{default_sa}"]:
         subprocess.run(
             [
-                "gcloud", "iam", "service-accounts", "add-iam-policy-binding",
+                GCLOUD_CMD, "iam", "service-accounts", "add-iam-policy-binding",
                 signing_sa,
                 f"--member={member}",
                 "--role=roles/iam.serviceAccountTokenCreator",
