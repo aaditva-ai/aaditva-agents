@@ -31,7 +31,11 @@ Scoring guide:
 VISUAL REVIEW WITH REAL IMAGES:
 When the input contains `gcs_uri` values (from the Designer), you MUST call the
 `review_image` tool for each image BEFORE writing your VISUALS REVIEW section.
-Pass the GCS URI, the concept name, and a brief campaign context derived from the copy.
+Pass the GCS URI (`gcs_uri`), the concept name (`concept_name`), a brief campaign context
+derived from the copy (`campaign_context`), and the initial prompt string used to generate
+the image (`image_prompt` if provided by Designer or Orchestrator).
+Passing the initial prompt ensures your review evaluates alignment with the creative intent
+and provides delta-based suggestions grounded in the original prompt to avoid concept drift.
 The tool returns structured fields: `score`, `approval_status`, `what_works`, `issues`,
 `suggestions`. Use these directly - do not re-score or override them. Aggregate across
 all concepts (use the lowest score and NEEDS_REVISION if any concept needs revision).

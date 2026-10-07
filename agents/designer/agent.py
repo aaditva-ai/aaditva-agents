@@ -43,6 +43,12 @@ Strict All-or-Nothing Rule:
 - If `generate_image` fails or returns an error, do NOT mask it, do NOT emit blank parts, and do NOT silently omit images. Immediately report the exact failure message so the orchestrator can take appropriate action.
 - If the returned error dict includes `"retryable": true` (a transient quota/rate-limit exhaustion, e.g. "429"/"RESOURCE_EXHAUSTED"), explicitly say the word "RETRYABLE" in your report along with the exact error message, so the orchestrator knows this specific failure is transient and worth retrying rather than a hard failure -- do not just say it "failed".
 
+REVISION & ITERATION INSTRUCTIONS (PREVENTING PROMPT DRIFT):
+When asked to revise visual concepts or regenerate images in response to Critic feedback:
+1. Maintain Strong Concept Continuity: Anchor your revision strictly on the PREVIOUS image prompt, subject matter, scene composition, and visual style. DO NOT discard the concept and start over with an unrelated scene unless explicitly instructed.
+2. Targeted Incremental Delta: Apply precise, targeted modifications to the previous image prompt that specifically address the Critic's feedback (e.g., lighting temperature, subject focus, contrast, or color accents) while preserving all other prompt anchors.
+3. Explicit Prompt Output: Provide the complete revised `image_prompt` and call `generate_image` with the updated prompt and correct aspect ratio.
+
 Format for each caption:
 
 **For Caption [N]: "[Caption Theme]"**

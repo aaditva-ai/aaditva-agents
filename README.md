@@ -163,7 +163,7 @@ This repository implements all requirements outlined in `Grading Rubric.html`. F
 | `GCS_IMAGES_BUCKET` | Cloud Storage bucket name for generated assets | `my-gcp-project-campaign-images` |
 | `SIGNING_SERVICE_ACCOUNT` | SA email for signed URLs during local testing | `SA_NAME@PROJECT.iam.gserviceaccount.com` |
 | `GEMINI_MODEL` | Text generation foundation model | `gemini-3-flash-preview` |
-| `GEMINI_IMAGE_MODEL` | Multimodal image generation model | `gemini-3.1-flash-image` |
+| `GEMINI_IMAGE_MODEL` | Multimodal image generation model | `gemini-2.5-flash-image` |
 | `GOOGLE_GENAI_USE_VERTEXAI` | Directs ADK to use Vertex AI endpoints | `1` |
 | `NOTION_TOKEN` | *(Optional)* Notion API integration token | `secret_...` |
 | `NOTION_PROJECT_DATABASE_ID` | *(Optional)* Notion Projects Database UUID | `32-char-uuid` |
@@ -472,7 +472,7 @@ Rather than writing fragile, 1-hour expiring signed URLs as text, the Project Ma
 
 ## 13. Teardown & Clean Up
 
-To delete all deployed Cloud Run services, staging buckets, Secret Manager secrets, and the Agent Engine instance:
+To delete all deployed microservices, background queues, service accounts, staging buckets, Secret Manager secrets, and the Agent Engine instance:
 
 ```bash
 # Default: deletes infrastructure but PRESERVES the campaign images bucket (evidence retention)
@@ -480,11 +480,25 @@ bash deploy/teardown_gcp.sh
 
 # Explicitly delete all resources INCLUDING the campaign images bucket
 bash deploy/teardown_gcp.sh --delete-images
+
+# Non-interactive execution (CI/CD / automation)
+bash deploy/teardown_gcp.sh -y
 ```
+
+Resources cleaned up by the teardown script:
+- **Cloud Run Services**: `brand-strategist`, `copywriter`, `designer`, `critic`, `project-manager`, `broker`, `campaign-driver`, `creative-director-ui`.
+- **Cloud Tasks Queues**: `campaigns`, `image-generation`.
+- **Dedicated Service Accounts**: `broker-sa`, `campaign-driver-sa`, `campaign-tasks-invoker`, `image-gen-tasks-invoker`.
+- **GCS Buckets**: `gs://${PROJECT_ID}-agent-staging`, `gs://run-sources-${PROJECT_ID}-${REGION}` (and conditionally `gs://${GCS_IMAGES_BUCKET}`).
+- **Secret Manager Secrets**: `notion-token`, `notion-project-db-id`, `notion-tasks-db-id`.
+- **Artifact Registry**: `cloud-run-source-deploy`.
+- **Vertex AI Agent Engine**: Orchestrator Reasoning Engine instance (`AGENT_ENGINE_RESOURCE_NAME` / `AGENT_ENGINE_ID`).
 
 Verify removal:
 ```bash
 gcloud run services list --region=$CLOUD_RUN_REGION
+gcloud tasks queues list --location=${CAMPAIGN_TASKS_LOCATION:-$CLOUD_RUN_REGION}
+gcloud iam service-accounts list --project=$GOOGLE_CLOUD_PROJECT
 gcloud storage buckets list --project=$GOOGLE_CLOUD_PROJECT
 ```
 

@@ -223,7 +223,7 @@ async def prepare_parallel_image_quotas() -> dict[str, Any]:
     """Prepares and validates elevated GenAI image generation quotas (Target 60 RPM)
     and multi-region failover endpoints for concurrent evaluation benchmark execution.
     """
-    image_model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
+    image_model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
     regions_str = os.environ.get("IMAGE_GEN_REGIONS", "us-central1,us-east4,europe-west4")
     regions = [r.strip() for r in regions_str.split(",") if r.strip()]
     target_rpm = int(os.environ.get("TARGET_IMAGEN_RPM", "60"))

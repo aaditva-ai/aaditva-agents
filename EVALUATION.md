@@ -108,7 +108,7 @@ All 5 specialists are independently deployed as A2A servers (Cloud Run), exposin
 ### 4. Multimodal Image Generation (Designer) (Weight: 15%)
 
 #### Rubric Expectation (100 - Excellent)
-Designer agent uses Gemini Imagen model (`imagen-3.0-generate-002` or `gemini-3.1-flash-image`) via a dedicated tool. Images uploaded to GCS bucket, returning `gs://` URI and artifact metadata. Tool receives aspect ratio ("1:1" or "4:5") and incorporates into generation parameters. Robust all-or-nothing image generation: fatal errors (billing, credits, model not found, safety blocks) fail immediately; transient errors (429 rate limits, 500/503/504) retry 2 times with exponential backoff. No silent partial visual sets or blank parts.
+Designer agent uses Gemini Imagen model (`imagen-3.0-generate-002` or `gemini-2.5-flash-image`) via a dedicated tool. Images uploaded to GCS bucket, returning `gs://` URI and artifact metadata. Tool receives aspect ratio ("1:1" or "4:5") and incorporates into generation parameters. Robust all-or-nothing image generation: fatal errors (billing, credits, model not found, safety blocks) fail immediately; transient errors (429 rate limits, 500/503/504) retry 2 times with exponential backoff. No silent partial visual sets or blank parts.
 
 #### Final Score: 100 / 100 (Excellent)
 

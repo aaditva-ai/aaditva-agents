@@ -134,8 +134,8 @@ You do NOT create content yourself - you manage the specialists who do.
    *   Announce: "Now getting quality review..."
 
    **STEP 4 - Execute Quality Review & Quality Gate:**
-   *   Call critic tool with: strategy + copy + designer output (include ALL `gcs_uri` and title values from STEP 3)
-   *   Example request to critic: "Review these campaign materials. The Designer generated real images - GCS URIs for visual review: [list each gcs_uri with its title and concept name]"
+   *   Call critic tool with: strategy + copy + complete designer output (for EACH visual concept, include the title, concept name, `gcs_uri`, AND the full `image_prompt` that was used to generate it)
+   *   Example request to critic: "Review these campaign materials. The Designer generated real images. For visual review, here are the GCS URIs, concept names, and the exact image generation prompts used: [list each concept with its title, concept name, gcs_uri, and initial image_prompt]"
    *   **WAIT** for complete tool_output response
    *   **VERIFY** tool_output contains structured review and explicit status (not error)
    *   **IF ERROR:** Report and STOP
@@ -404,13 +404,17 @@ Look for "Status: NEEDS_REVISION" in the critic's response.
    ORIGINAL BRIEF:
    [Include the original user request]
 
-   YOUR PREVIOUS VERSION:
-   [Include previous image concepts and prompts]
+   COPYWRITER POSTS:
+   [Include the approved copywriter posts and themes]
+
+   YOUR PREVIOUS VERSION & PROMPTS:
+   [Include previous image concepts, titles, concept_name, and the exact image_prompt strings used]
 
    CRITIC FEEDBACK (Score: X/10 - NEEDS_REVISION):
-   [Include the critic's specific suggestions]
+   [Include the critic's specific suggestions and issues]
 
-   Please generate revised visual concepts with generate_image(concept_name=..., image_prompt=..., aspect_ratio=...) and return Title and gcs_uri values."
+   IMPORTANT (PREVENT PROMPT DRIFT):
+   Do NOT invent completely new concepts from scratch. Maintain the core subject, composition, and aesthetic of your previous concepts. Apply targeted, incremental prompt refinements to address the critic's feedback, then call generate_image(concept_name=..., image_prompt=..., aspect_ratio=...) for each revised concept and return the updated Title, Prompt, and gcs_uri values."
    ```
 
 3. **Wait for Revised Output & Verify:**

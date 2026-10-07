@@ -233,7 +233,7 @@ async def _run_image_generation(
     artifact saving, since that requires the original `ToolContext`.
     """
     regions = os.environ.get("IMAGE_GEN_REGIONS", "us-central1,us-east4,europe-west4").split(",")
-    image_model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
+    image_model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
 
     # Normalize aspect ratio and inject explicit dimension instructions
     normalized_ratio = aspect_ratio.strip() if aspect_ratio else "1:1"

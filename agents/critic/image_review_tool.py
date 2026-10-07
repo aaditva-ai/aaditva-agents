@@ -33,7 +33,12 @@ class ImageReviewResult(BaseModel):
     error: Optional[str] = None
 
 
-def review_image(gcs_uri: str, concept_name: str, campaign_context: str):
+def review_image(
+    gcs_uri: str,
+    concept_name: str,
+    campaign_context: str,
+    image_prompt: Optional[str] = None,
+):
     """
     Review an image stored in GCS using Gemini multimodal.
 
@@ -44,6 +49,7 @@ def review_image(gcs_uri: str, concept_name: str, campaign_context: str):
         gcs_uri: GCS URI of the image (gs://bucket/path.png)
         concept_name: Name/label for this image concept
         campaign_context: Brief describing the campaign, brand voice, target audience
+        image_prompt: Optional initial prompt string used to generate the image, providing baseline creative intent to evaluate against and prevent prompt drift during revisions
 
     Returns:
         ImageReviewResult with score (1-10), approval_status (APPROVED/NEEDS_REVISION),
@@ -63,23 +69,34 @@ def review_image(gcs_uri: str, concept_name: str, campaign_context: str):
 
         image_part = types.Part.from_uri(file_uri=gcs_uri, mime_type=mime_type)
 
-        prompt = f"""You are reviewing an AI-generated image for an Instagram campaign.
+        prompt_parts = [
+            "You are reviewing an AI-generated image for an Instagram campaign.",
+            f"Campaign context: {campaign_context}",
+            f"Concept name: {concept_name}",
+        ]
+        if image_prompt:
+            prompt_parts.append(f"Initial image prompt used for generation: {image_prompt}")
 
-Campaign context: {campaign_context}
-Concept name: {concept_name}
-
-Evaluate this image on:
-- Visual quality and composition
-- Brand alignment and audience fit
-- Instagram platform suitability
-- Visual-copy alignment potential
-
-Scoring guide:
-- 9-10: APPROVED (exceptional)
-- 7-8:  APPROVED (good, minor polish only)
-- 5-6:  NEEDS_REVISION (has potential but needs improvement)
-- 1-4:  NEEDS_REVISION (significant issues)
-"""
+        prompt_parts.extend([
+            "",
+            "Evaluate this image on:",
+            "- Visual quality and composition",
+            "- Alignment with the initial image prompt and creative intent",
+            "- Brand alignment and audience fit",
+            "- Instagram platform suitability",
+            "- Visual-copy alignment potential",
+            "",
+            "IMPORTANT GUIDANCE FOR REVISIONS:",
+            "- Ground all suggestions in the initial image prompt context.",
+            "- If NEEDS_REVISION, suggest specific, incremental modifications to the initial image prompt rather than inventing an entirely new visual concept, preventing prompt drift across iterations.",
+            "",
+            "Scoring guide:",
+            "- 9-10: APPROVED (exceptional)",
+            "- 7-8:  APPROVED (good, minor polish only)",
+            "- 5-6:  NEEDS_REVISION (has potential but needs improvement)",
+            "- 1-4:  NEEDS_REVISION (significant issues)",
+        ])
+        prompt = "\n".join(prompt_parts)
 
         response = client.models.generate_content(
             model=model,
