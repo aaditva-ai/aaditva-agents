@@ -128,6 +128,32 @@ describe("useCampaignEvents polling", () => {
     await waitFor(() => expect(authedFetch.mock.calls.length).toBeGreaterThan(callsWhileStalled));
     await waitFor(() => expect(result.current.data?.status).toBe("running"));
   });
+
+  it("polls for first events when seeded with initial starting placeholder (cursor: null)", async () => {
+    const authedFetch = vi.spyOn(authedFetchModule, "authedFetch");
+    authedFetch.mockResolvedValueOnce(makePage("t1", "running", 1));
+
+    queryClient.setQueryData(["campaign", "session-new", "events"], {
+      pages: [{ cursor: null, status: "starting", steps: [] } satisfies EventsPage],
+      pageParams: [undefined],
+    });
+
+    const { result } = renderHook(() => useCampaignEvents("session-new"), {
+      wrapper: wrapper(queryClient),
+    });
+
+    expect(result.current.hasNextPage).toBe(true);
+    expect(result.current.data?.status).toBe("starting");
+    expect(result.current.data?.groups.length).toBe(0);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    await waitFor(() => expect(authedFetch).toHaveBeenCalledWith("/campaigns/session-new/events"));
+    await waitFor(() => expect(result.current.data?.status).toBe("running"));
+    expect(result.current.data?.groups.length).toBe(1);
+  });
 });
 
 describe("Evaluation API queries", () => {

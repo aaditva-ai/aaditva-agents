@@ -123,7 +123,7 @@ export function useCampaignEvents(sessionId: string | undefined) {
     },
     enabled: Boolean(sessionId),
     initialPageParam: undefined as string | null | undefined,
-    getNextPageParam: (lastPage) => lastPage.cursor,
+    getNextPageParam: (lastPage) => (isTerminal(lastPage.status) ? undefined : (lastPage.cursor ?? "")),
     select: selectTranscript,
     refetchOnWindowFocus: false, // a focus-triggered refetch() would hit the same re-fetch-from-page-0 issue
     retry: 5,
