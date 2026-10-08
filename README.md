@@ -162,8 +162,9 @@ This repository implements all requirements outlined in `Grading Rubric.html`. F
 | `CLOUD_RUN_REGION` | Cloud Run and Agent Engine deployment region | `us-central1` (must be physical region) |
 | `GCS_IMAGES_BUCKET` | Cloud Storage bucket name for generated assets | `my-gcp-project-campaign-images` |
 | `SIGNING_SERVICE_ACCOUNT` | SA email for signed URLs during local testing | `SA_NAME@PROJECT.iam.gserviceaccount.com` |
-| `GEMINI_MODEL` | Text generation foundation model | `gemini-3-flash-preview` |
-| `GEMINI_IMAGE_MODEL` | Multimodal image generation model | `gemini-2.5-flash-image` |
+| `GEMINI_MODEL` | Text generation foundation model | `gemini-3.8-flash` |
+| `GEMINI_IMAGE_MODEL` | Multimodal image generation model | `gemini-nano-banana-2.1` |
+| `GEMINI_IMAGE_BACKUP_MODEL` | Backup image generation model | `gemini-3.1-flash-lite-image` |
 | `GOOGLE_GENAI_USE_VERTEXAI` | Directs ADK to use Vertex AI endpoints | `1` |
 | `NOTION_TOKEN` | *(Optional)* Notion API integration token | `secret_...` |
 | `NOTION_PROJECT_DATABASE_ID` | *(Optional)* Notion Projects Database UUID | `32-char-uuid` |

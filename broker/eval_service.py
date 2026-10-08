@@ -223,26 +223,28 @@ async def prepare_parallel_image_quotas() -> dict[str, Any]:
     """Prepares and validates elevated GenAI image generation quotas (Target 60 RPM)
     and multi-region failover endpoints for concurrent evaluation benchmark execution.
     """
-    image_model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
-    regions_str = os.environ.get("IMAGE_GEN_REGIONS", "us-central1,us-east4,europe-west4")
+    image_model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-nano-banana-2.1")
+    backup_model = os.environ.get("GEMINI_IMAGE_BACKUP_MODEL", "gemini-3.1-flash-lite-image")
+    regions_str = os.environ.get("IMAGE_GEN_REGIONS", "global")
     regions = [r.strip() for r in regions_str.split(",") if r.strip()]
     target_rpm = int(os.environ.get("TARGET_IMAGEN_RPM", "60"))
     queue_name = os.environ.get("IMAGE_GEN_QUEUE_NAME", "image-generation-queue")
     project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT_ID", "default-project")
 
     logger.info(
-        "Prepared parallel GenAI image quotas for model %s: target %d RPM across regions %s",
-        image_model, target_rpm, regions,
+        "Prepared parallel GenAI image quotas for model %s (backup: %s): target %d RPM across regions %s",
+        image_model, backup_model, target_rpm, regions,
     )
 
     return {
         "status": "ready",
         "elevated": True,
         "model": image_model,
+        "backupModel": backup_model,
         "targetRpm": target_rpm,
         "regions": regions,
         "queueName": queue_name,
         "projectId": project_id,
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
-        "message": f"GenAI Image Generation quotas prepared and elevated to {target_rpm} RPM across {len(regions)} regions for {image_model}."
+        "message": f"GenAI Image Generation quotas prepared and elevated to {target_rpm} RPM across {len(regions)} regions for {image_model} (fallback: {backup_model})."
     }

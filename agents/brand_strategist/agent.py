@@ -56,7 +56,7 @@ Format your output as:
 
 root_agent = Agent(
     name="brand_strategist",
-    model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+    model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
     generate_content_config=GENERATE_CONTENT_CONFIG,
     instruction=SYSTEM_INSTRUCTION,
     description="Brand strategist for market research, trend analysis, and competitive insights",

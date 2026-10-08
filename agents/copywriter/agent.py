@@ -38,7 +38,7 @@ Follow the output format defined in the skill exactly.
 
 root_agent = Agent(
     name="copywriter",
-    model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+    model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
     generate_content_config=GENERATE_CONTENT_CONFIG,
     tools=[_copywriting_skills],
     instruction=SYSTEM_INSTRUCTION,

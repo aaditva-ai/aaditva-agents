@@ -338,7 +338,7 @@ async def deploy_single_agent(
     # Writing the env vars to a YAML file and using `--env-vars-file` avoids
     # shell/batch re-parsing entirely, since only a file path is passed on
     # the command line. See `gcloud topic escaping` / `gcloud run deploy --help`.
-    gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
     model_location = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
     env_vars_dict = {
         "GOOGLE_GENAI_USE_VERTEXAI": "true",
@@ -353,15 +353,19 @@ async def deploy_single_agent(
         print(f"   Adding GCS_IMAGES_BUCKET to {name}...")
         env_vars_dict["GCS_IMAGES_BUCKET"] = gcs_bucket
 
-    # Pass image model override to designer
-    gemini_image_model = os.getenv("GEMINI_IMAGE_MODEL", "")
-    if gemini_image_model and name == "designer":
-        env_vars_dict["GEMINI_IMAGE_MODEL"] = gemini_image_model
+    # Pass image model overrides to designer
+    gemini_image_model = os.getenv("GEMINI_IMAGE_MODEL", "gemini-nano-banana-2.1")
+    gemini_image_backup_model = os.getenv("GEMINI_IMAGE_BACKUP_MODEL", "gemini-3.1-flash-lite-image")
+    if name == "designer":
+        if gemini_image_model:
+            env_vars_dict["GEMINI_IMAGE_MODEL"] = gemini_image_model
+        if gemini_image_backup_model:
+            env_vars_dict["GEMINI_IMAGE_BACKUP_MODEL"] = gemini_image_backup_model
 
     # Image-generation queue/rate-limit/failover tunables (designer only)
     if name == "designer":
-        configured_regions = os.getenv("IMAGE_GEN_REGIONS", "us-central1,us-east4,europe-west4")
-        image_model_for_check = gemini_image_model or "gemini-3.1-flash-image"
+        configured_regions = os.getenv("IMAGE_GEN_REGIONS", "global")
+        image_model_for_check = gemini_image_model or "gemini-nano-banana-2.1"
         verified_regions = await _verify_image_gen_regions(
             [r.strip() for r in configured_regions.split(",") if r.strip()],
             project_id,

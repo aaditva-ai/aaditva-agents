@@ -119,7 +119,7 @@ def create_creative_director():
 
     agent = Agent(
         name="creative_director",
-        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
         description="Creative Director orchestrator that coordinates specialist agents",
         instruction=system_instruction,
         tools=agent_tools,
@@ -132,7 +132,7 @@ def create_creative_director():
     from google.adk.models import Gemini
 
     compaction_config = EventsCompactionConfig(
-        summarizer=LlmEventSummarizer(llm=Gemini(model_id=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))),
+        summarizer=LlmEventSummarizer(llm=Gemini(model_id=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"))),
         compaction_interval=3,  # Summarize after every 3 agent completions
         overlap_size=1,  # Keep the most recent agent's output in full
     )

@@ -137,7 +137,7 @@ def create_project_manager_agent():
 
         return Agent(
             name="project_manager",
-            model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
             generate_content_config=GENERATE_CONTENT_CONFIG,
             instruction=get_system_instruction(),
             description="Project manager that creates campaign timelines and task breakdowns",
@@ -167,7 +167,7 @@ def create_project_manager_agent():
 
         return Agent(
             name="project_manager",
-            model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
             generate_content_config=GENERATE_CONTENT_CONFIG,
             after_tool_callback=handle_notion_error,
             instruction=get_system_instruction(

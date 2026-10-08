@@ -160,18 +160,16 @@ def _generate_with_region_failover(
     project_id: str,
     image_model: str,
     prompt_with_aspect: str,
+    backup_model: Optional[str] = None,
 ):
     """
     Call `generate_content` against each region in `regions` in order.
 
-    On a 429/RESOURCE_EXHAUSTED response from a region, retries the same
-    region up to `_QUOTA_RETRY_ATTEMPTS` times with exponential backoff
-    (since a single region -- e.g. a "global"-only fallback list -- may be
-    the only option, so failing over immediately would just raise). Once
-    those in-region retries are exhausted, fails over to the next region
-    without waiting further. Backoff for 500/503/504 is preserved
-    *within* each individual call via `retry_options` below. Re-raises the
-    last exception once all regions (and their retries) are exhausted.
+    First attempts generation using `image_model`. On a 429/RESOURCE_EXHAUSTED
+    response from a region, retries up to `_QUOTA_RETRY_ATTEMPTS` times with
+    exponential backoff before failing over to the next region. If all candidate
+    regions fail for `image_model`, attempts generation with `backup_model`
+    across `regions` before raising.
     """
     retry_options = types.HttpRetryOptions(
         attempts=3,
@@ -180,40 +178,57 @@ def _generate_with_region_failover(
         http_status_codes=[500, 503, 504],
     )
 
+    models_to_try = [image_model]
+    if backup_model and backup_model.strip() and backup_model.strip() != image_model:
+        models_to_try.append(backup_model.strip())
+
     last_exception = None
-    for region in regions:
-        region = region.strip()
-        client = genai.Client(vertexai=True, project=project_id, location=region)
-        for attempt in range(1, _QUOTA_RETRY_ATTEMPTS + 1):
-            try:
-                return client.models.generate_content(
-                    model=image_model,
-                    contents=prompt_with_aspect,
-                    config=types.GenerateContentConfig(
-                        response_modalities=["IMAGE", "TEXT"],
-                        http_options=types.HttpOptions(
-                            retry_options=retry_options,
-                            timeout=180_000,
+    for model_name in models_to_try:
+        for region in regions:
+            region = region.strip()
+            if not region:
+                continue
+            client = genai.Client(vertexai=True, project=project_id, location=region)
+            for attempt in range(1, _QUOTA_RETRY_ATTEMPTS + 1):
+                try:
+                    logger.info(
+                        f"Attempting image generation with model '{model_name}' in region '{region}' "
+                        f"(attempt {attempt}/{_QUOTA_RETRY_ATTEMPTS})"
+                    )
+                    return client.models.generate_content(
+                        model=model_name,
+                        contents=prompt_with_aspect,
+                        config=types.GenerateContentConfig(
+                            response_modalities=["IMAGE", "TEXT"],
+                            http_options=types.HttpOptions(
+                                retry_options=retry_options,
+                                timeout=180_000,
+                            ),
                         ),
-                    ),
-                )
-            except Exception as e:
-                last_exception = e
-                if not _is_quota_exhausted_error(e):
-                    raise
-                if attempt < _QUOTA_RETRY_ATTEMPTS:
-                    delay = _QUOTA_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
-                    logger.warning(
-                        f"Region {region} returned 429/RESOURCE_EXHAUSTED "
-                        f"(attempt {attempt}/{_QUOTA_RETRY_ATTEMPTS}), "
-                        f"retrying in {delay}s"
                     )
-                    time.sleep(delay)
-                else:
-                    logger.warning(
-                        f"Region {region} still 429/RESOURCE_EXHAUSTED after "
-                        f"{_QUOTA_RETRY_ATTEMPTS} attempts, failing over to next region"
-                    )
+                except Exception as e:
+                    last_exception = e
+                    if not _is_quota_exhausted_error(e):
+                        logger.warning(
+                            f"Model '{model_name}' in region '{region}' raised non-quota error: {e}"
+                        )
+                        break
+                    if attempt < _QUOTA_RETRY_ATTEMPTS:
+                        delay = _QUOTA_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+                        logger.warning(
+                            f"Model '{model_name}' in region '{region}' returned 429/RESOURCE_EXHAUSTED "
+                            f"(attempt {attempt}/{_QUOTA_RETRY_ATTEMPTS}), retrying in {delay}s"
+                        )
+                        time.sleep(delay)
+                    else:
+                        logger.warning(
+                            f"Model '{model_name}' in region '{region}' still 429/RESOURCE_EXHAUSTED after "
+                            f"{_QUOTA_RETRY_ATTEMPTS} attempts, failing over"
+                        )
+        logger.warning(
+            f"Image generation with model '{model_name}' exhausted across all regions ({regions}). "
+            f"Checking next fallback model..."
+        )
 
     raise last_exception
 
@@ -232,8 +247,9 @@ async def _run_image_generation(
     the ADK `generate_image` tool-call coroutine. Does not perform ADK
     artifact saving, since that requires the original `ToolContext`.
     """
-    regions = os.environ.get("IMAGE_GEN_REGIONS", "us-central1,us-east4,europe-west4").split(",")
-    image_model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
+    regions = os.environ.get("IMAGE_GEN_REGIONS", "global").split(",")
+    image_model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-nano-banana-2.1")
+    backup_model = os.environ.get("GEMINI_IMAGE_BACKUP_MODEL", "gemini-3.1-flash-lite-image")
 
     # Normalize aspect ratio and inject explicit dimension instructions
     normalized_ratio = aspect_ratio.strip() if aspect_ratio else "1:1"
@@ -253,6 +269,7 @@ async def _run_image_generation(
             project_id=project_id,
             image_model=image_model,
             prompt_with_aspect=prompt_with_aspect,
+            backup_model=backup_model,
         )
 
         # 1. Candidate validation
